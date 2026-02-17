@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 import numpy as np
-import onnxruntime as ort  # Added for hardware detection
+import onnxruntime as ort
 from kokoro_onnx import Kokoro
 from wyoming.server import AsyncServer, AsyncEventHandler
 from wyoming.event import Event
@@ -13,9 +13,7 @@ from wyoming.audio import AudioStart, AudioChunk, AudioStop
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
-# Comprehensive Voice Mapping
 VOICE_TRAITS = {
-    # American Female (af_)
     "af_alloy": {"gender": "Female", "tone": "Neutral"},
     "af_aoede": {"gender": "Female", "tone": "Lyric"},
     "af_bella": {"gender": "Female", "tone": "Soft/Warm"},
@@ -27,8 +25,6 @@ VOICE_TRAITS = {
     "af_river": {"gender": "Female", "tone": "Smooth"},
     "af_sarah": {"gender": "Female", "tone": "Cheerful"},
     "af_sky": {"gender": "Female", "tone": "Friendly"},
-    
-    # American Male (am_)
     "am_adam": {"gender": "Male", "tone": "Deep/Resonant"},
     "am_echo": {"gender": "Male", "tone": "Neutral"},
     "am_eric": {"gender": "Male", "tone": "Expressive"},
@@ -38,8 +34,6 @@ VOICE_TRAITS = {
     "am_onyx": {"gender": "Male", "tone": "Bold"},
     "am_puck": {"gender": "Male", "tone": "Youthful"},
     "am_santa": {"gender": "Male", "tone": "Jolly"},
-
-    # British (bf_ / bm_)
     "bf_alice": {"gender": "Female", "tone": "British Crisp"},
     "bf_emma": {"gender": "Female", "tone": "British Gentle"},
     "bf_isabella": {"gender": "Female", "tone": "British Clear"},
@@ -48,41 +42,28 @@ VOICE_TRAITS = {
     "bm_fable": {"gender": "Male", "tone": "British Storyteller"},
     "bm_george": {"gender": "Male", "tone": "British Warm"},
     "bm_lewis": {"gender": "Male", "tone": "British Formal"},
-
-    # International (Japanese, Chinese, etc.)
     "jf_alpha": {"gender": "Female", "tone": "Japanese Clear"},
     "zf_xiaoxiao": {"gender": "Female", "tone": "Mandarin Sweet"},
     "ff_siwis": {"gender": "Female", "tone": "French Soft"},
 }
 
 def get_voice_metadata(v_code):
-    """Parses voice code into Pretty Name and HA Filter Language."""
     name_parts = v_code.split("_")
     short_name = name_parts[-1].capitalize()
-    
-    # Language Code Mapping for Client-Side Filtering
     lang_map = {
-        "af": "en-us", "am": "en-us", # American
-        "bf": "en-gb", "bm": "en-gb", # British
-        "jf": "ja",    "jm": "ja",    # Japanese
-        "zf": "zh",    "zm": "zh",    # Chinese
-        "ff": "fr",                   # French
-        "hf": "hi",    "hm": "hi",    # Hindi
-        "if": "it",    "im": "it",    # Italian
-        "pf": "pt",    "pm": "pt",    # Portuguese
-        "ef": "en",    "em": "en"     # Generic English
+        "af": "en-us", "am": "en-us", "bf": "en-gb", "bm": "en-gb",
+        "jf": "ja", "jm": "ja", "zf": "zh", "zm": "zh", "ff": "fr",
+        "hf": "hi", "hm": "hi", "if": "it", "im": "it", "pf": "pt",
+        "pm": "pt", "ef": "en", "em": "en"
     }
-    
     prefix = v_code[:2]
     lang_code = lang_map.get(prefix, "en-us")
-    
     traits = VOICE_TRAITS.get(v_code)
     if traits:
         pretty_name = f"{short_name} ({traits['gender']}, {traits['tone']})"
     else:
         gender = "Female" if "_f_" in v_code or prefix.endswith("f") else "Male"
         pretty_name = f"{short_name} ({gender})"
-
     return pretty_name, lang_code
 
 class KokoroWyomingHandler(AsyncEventHandler):
@@ -91,47 +72,30 @@ class KokoroWyomingHandler(AsyncEventHandler):
         self.kokoro = kokoro
         self.default_voice = default_voice
         self.speed = speed
-        _LOGGER.info("Client connected.")
 
     async def handle_event(self, event: Event) -> bool:
         if event.type == "describe":
-            _LOGGER.info("Sending enriched voice list to client.")
             voice_list = []
             for v in self.kokoro.get_voices():
                 pretty_name, lang_code = get_voice_metadata(v)
                 voice_list.append({
-                    "name": v,
-                    "description": pretty_name,
-                    "languages": [lang_code],
-                    "installed": True,
+                    "name": v, "description": pretty_name,
+                    "languages": [lang_code], "installed": True,
                     "attribution": {"name": "hexgrad", "url": ""}
                 })
-
-            await self.write_event(Event(
-                type="info",
-                data={
-                    "tts": [{
-                        "name": "kokoro",
-                        "description": "Kokoro TTS (Wyoming Server)",
-                        "installed": True,
-                        "attribution": {"name": "hexgrad", "url": ""},
-                        "voices": voice_list
-                    }]
-                }
-            ))
+            await self.write_event(Event(type="info", data={"tts": [{
+                "name": "kokoro", "description": "Kokoro TTS",
+                "installed": True, "voices": voice_list
+            }]}))
             return True
 
         if event.type == "synthesize":
             synth = Synthesize.from_event(event)
             voice = synth.voice.name if synth.voice else self.default_voice
-            
-            # Map the prefix to the correct engine language
             engine_lang = "en-us"
             if voice.startswith("jf"): engine_lang = "ja"
             elif voice.startswith("zf"): engine_lang = "zh"
             elif voice.startswith("ff"): engine_lang = "fr"
-            
-            _LOGGER.info(f"Synthesizing: {synth.text[:40]}... [{voice} / {engine_lang}]")
             
             try:
                 samples, sample_rate = self.kokoro.create(
@@ -142,39 +106,41 @@ class KokoroWyomingHandler(AsyncEventHandler):
                 await self.write_event(AudioChunk(audio=audio_data, rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
             except Exception as e:
-                _LOGGER.error(f"Error during synthesis: {e}")
-            
+                _LOGGER.error(f"Synthesis error: {e}")
             return False
         return True
 
 async def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_data = os.path.join(script_dir, "data")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--uri", default="tcp://0.0.0.0:10200")
-    parser.add_argument("--model", default="kokoro-v1.0.onnx")
-    parser.add_argument("--voices", default="voices-v1.0.bin")
+    parser.add_argument("--data-dir", default=default_data)
+    parser.add_argument("--model", help="Path to ONNX file")
+    parser.add_argument("--voices", help="Path to voices.bin")
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--speed", type=float, default=1.0)
-    parser.add_argument("--cpu", action="store_true", help="Force CPU mode")
+    parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
 
-    # Hardware Detection Logic
-    available_providers = ort.get_available_providers()
+    model_path = args.model or os.path.join(args.data_dir, "kokoro-v1.0.onnx")
+    voices_path = args.voices or os.path.join(args.data_dir, "voices-v1.0.bin")
+
+    available = ort.get_available_providers()
     if args.cpu:
         provider = "CPUExecutionProvider"
-        _LOGGER.info("Hardware Mode: Forced CPU")
-    elif "CUDAExecutionProvider" in available_providers:
+    elif "CUDAExecutionProvider" in available:
         provider = "CUDAExecutionProvider"
-        _LOGGER.info("Hardware Mode: NVIDIA GPU (CUDA)")
     else:
         provider = "CPUExecutionProvider"
-        _LOGGER.info("Hardware Mode: CPU (Auto-fallback)")
-
-    # Initialize Kokoro with selected provider
-    kokoro = Kokoro(args.model, args.voices, provider=provider)
     
+    _LOGGER.info(f"Hardware: {provider}")
+    _LOGGER.info(f"Model: {model_path}")
+
+    kokoro = Kokoro(model_path, voices_path, provider=provider)
     server = AsyncServer.from_uri(args.uri)
-    _LOGGER.info(f"Server listening on {args.uri}")
-    await server.run(lambda reader, writer: KokoroWyomingHandler(kokoro, args.voice, args.speed, reader, writer))
+    await server.run(lambda r, w: KokoroWyomingHandler(kokoro, args.voice, args.speed, r, w))
 
 if __name__ == "__main__":
     asyncio.run(main())
