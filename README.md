@@ -19,7 +19,7 @@ This repository is hardware-intelligent and distro-aware. During setup, it detec
 The setup script handles the heavy lifting: installing system dependencies, configuring NVIDIA repositories for your specific Linux distro, and creating a virtual environment.
 
 ```bash
-git clone https://github.com/chiabre/kokoro-wyoming-gpu.git
+git clone https://github.com/chiabre/kokoro-wyoming.git
 cd kokoro-wyoming-gpu
 chmod +x script/setup
 ./script/setup
