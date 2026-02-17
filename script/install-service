@@ -1,24 +1,32 @@
 #!/usr/bin/env bash
 # Automatically creates and starts the systemd service
 SERVICE_PATH="/etc/systemd/system/wyoming-kokoro.service"
-WORKING_DIR=$(pwd)
+# Get the absolute path of the directory where this script is located
+ABS_PATH=$(cd "$(dirname "$0")/.." && pwd)
+# Get the current username
+CURRENT_USER=$(whoami)
+
+echo "Installing Wyoming Kokoro service for user: $CURRENT_USER"
+echo "Project directory: $ABS_PATH"
 
 sudo bash -c "cat > $SERVICE_PATH" <<EOF
 [Unit]
-Description=Wyoming Kokoro
+Description=Wyoming Kokoro TTS
 After=network.target
 
 [Service]
 Type=simple
-User=%U
-WorkingDirectory=/opt/kokoro-wyoming
+User=$CURRENT_USER
+WorkingDirectory=$ABS_PATH
 # Default environment variables
 Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
 Environment="KOKORO_ARGS=--uri tcp://0.0.0.0:10200"
 
 # Using the variable in ExecStart
-ExecStart=/opt/kokoro-wyoming/.venv/bin/python3 wyoming_kokoro.py $KOKORO_ARGS
+# We use script/run because it handles venv activation internally
+ExecStart=$ABS_PATH/script/run \$KOKORO_ARGS
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
@@ -27,4 +35,8 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable wyoming-kokoro
 sudo systemctl start wyoming-kokoro
-echo "Service installed and started!"
+
+echo "-------------------------------------------------------"
+echo "✅ Service installed and started!"
+echo "Check status: sudo systemctl status wyoming-kokoro"
+echo "View logs:    journalctl -u wyoming-kokoro -f"
