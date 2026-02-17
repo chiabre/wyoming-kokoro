@@ -5,15 +5,19 @@ WORKING_DIR=$(pwd)
 
 sudo bash -c "cat > $SERVICE_PATH" <<EOF
 [Unit]
-Description=Wyoming Kokoro GPU
+Description=Wyoming Kokoro
 After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$WORKING_DIR
+User=%U
+WorkingDirectory=/opt/kokoro-wyoming
+# Default environment variables
 Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
-ExecStart=$WORKING_DIR/.venv/bin/python3 wyoming_kokoro.py --uri tcp://0.0.0.0:10200
+Environment="KOKORO_ARGS=--uri tcp://0.0.0.0:10200"
+
+# Using the variable in ExecStart
+ExecStart=/opt/kokoro-wyoming/.venv/bin/python3 wyoming_kokoro.py $KOKORO_ARGS
 Restart=always
 
 [Install]
