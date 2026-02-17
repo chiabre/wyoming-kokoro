@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 set -e
 
-# 1. Install system dependencies
-echo "Installing system dependencies..."
-sudo apt-get update
-sudo apt-get install --no-install-recommends -y \
-    python3-venv \
-    python3-pip \
-    espeak-ng
+echo "📦 Installing system dependencies..."
+sudo apt-get update && sudo apt-get install -y espeak-ng python3-venv
 
-# 2. Setup Virtual Environment
-echo "Setting up virtual environment..."
+echo "🐍 Creating virtual environment..."
 python3 -m venv .venv
 source .venv/bin/activate
-
-# 3. Install Python packages
-echo "Installing Python dependencies..."
 pip install --upgrade pip
-pip install onnxruntime-gpu kokoro-onnx wyoming numpy
 
-echo "Setup complete! Don't forget to download your .onnx and .bin files."
+if command -v nvidia-smi &> /dev/null; then
+    echo "🚀 GPU Detected. Installing GPU requirements..."
+    pip install onnxruntime-gpu kokoro-onnx wyoming
+else
+    echo "🐌 No GPU detected. Installing CPU requirements..."
+    pip install onnxruntime kokoro-onnx wyoming
+fi
+
+echo "✅ Setup complete!"
