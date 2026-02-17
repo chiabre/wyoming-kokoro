@@ -31,10 +31,10 @@ Download the essential model and voice database into the project root:
 
 ```bash
 # Download the Kokoro ONNX model
-wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+wget -O data/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
 
 # Download the voice metadata
-wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+wget -O data/voices-v1.0.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 ```
 
 ## 🚀 Running the Service
@@ -42,11 +42,14 @@ wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v
 To start the server manually:
 
 ```bash
-# GPU / Auto-detect
+# Auto-detect hardware, use ./data
 ./script/run --uri tcp://0.0.0.0:10200
 
 # CPU mode
 ./script/run --uri tcp://0.0.0.0:10200 --cpu
+
+#Use a custom folder for all model files
+./script/run --data-dir /path/to/models
 ```
 
 ### Systemd Deployment
