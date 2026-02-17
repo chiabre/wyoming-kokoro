@@ -32,7 +32,8 @@ if lspci | grep -i nvidia &> /dev/null; then
         echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
         echo "✅ CUDA paths added to ~/.bashrc"
     fi
-    
+
+    # SESSION PATH UPDATE (For this script to finish correctly)
     export PATH=/usr/local/cuda/bin:$PATH
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
     
@@ -42,9 +43,13 @@ else
     GPU_INSTALL=false
 fi
 
-echo "🐍 Creating virtual environment..."
-python3 -m venv .venv
-source .venv/bin/activate
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+VENV_DIR="$PROJECT_ROOT/.venv"
+
+echo "🐍 Setting up virtual environment..."
+python3 -m venv "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
 pip install --upgrade pip wheel
 
 if [ "$GPU_INSTALL" = true ]; then
@@ -55,11 +60,21 @@ fi
 
 mkdir -p data
 
+chmod +x "$SCRIPT_DIR/run" "$SCRIPT_DIR/install-service"
+
 echo "-------------------------------------------------------"
 echo "✅ Setup complete for $DISTRO $VERSION_ID!"
 if [ "$GPU_INSTALL" = true ]; then
     echo "🔍 SANITY CHECK:"
-    nvcc --version | grep "release" || echo "⚠️ nvcc not in PATH yet."
-    ls /usr/local/cuda/lib64/libcudnn.so.9* &> /dev/null && echo "✅ cuDNN 9 found."
+    if command -v nvcc >/dev/null 2>&1; then
+        nvcc --version | grep "release"
+    else
+        echo "⚠️ nvcc not in PATH yet."
+    fi
+    if ldconfig -p 2>/dev/null | grep -q libcudnn.so.9; then
+        echo "✅ cuDNN 9 is installed and registered."
+    else
+        echo "❌ cuDNN 9 not found in linker cache."
+    fi
 fi
 echo "-------------------------------------------------------"
