@@ -4,25 +4,20 @@
 
 ## ⚡ Hardware Selection
 
-### 🟢 GPU Mode (Recommended)
-**Performance:** Near-instant speech generation (sub-300ms latency).  
-**Requirements:**
-* **NVIDIA Driver:** 550+
-* **CUDA:** 12.x
-* **cuDNN:** 9.x
-* **LXC Users:** Ensure GPU passthrough is configured in your Proxmox lxc.
+This repository is hardware-intelligent. It detects your environment and optimizes the engine accordingly.
 
-### 🔵 CPU Mode
-**Performance:** Balanced (approx. 1-3s latency).  
-**Requirements:**
-* **Processor:** Any modern x86_64 or ARM64 CPU.
+| Feature | 🟢 GPU Mode (Recommended) | 🔵 CPU Mode |
+| :--- | :--- | :--- |
+| **Performance** | Near-instant (sub-300ms latency) | Balanced (~1-3s latency) |
+| **Requirements** | NVIDIA GPU + Driver 550+ | Any modern x86_64 / ARM64 CPU |
+| **Libraries** | CUDA 12.x & cuDNN 9.x | No extra drivers required |
 
 ---
 
-## 🛠 Installation
+## ⚙️ Installation
 
 ### 1. Setup the Environment
-Clone the repo and run the hardware-aware setup script. It will automatically detect if you have an NVIDIA GPU and install the correct `onnxruntime` package.
+Clone the repo and run the setup script. It will detect your hardware and install either `onnxruntime-gpu` or the `standard onnxruntime`.
 
 ```bash
 git clone [https://github.com/your-username/kokoro-wyoming-gpu.git](https://github.com/your-username/kokoro-wyoming-gpu.git)
@@ -32,7 +27,7 @@ chmod +x script/setup
 ```
 
 ### 2. Download Model Files
-Run these commands from the root of the project folder to download the essential model and voice database:
+Download the essential model and voice database into the project root:
 
 ```bash
 # Download the Kokoro ONNX model
@@ -54,8 +49,8 @@ To start the server manually:
 ./script/run --uri tcp://0.0.0.0:10200 --cpu
 ```
 
-### Systemd Deployment (LXC & Linux)
-To install as a background service that starts on boot:
+### Systemd Deployment
+To run this as a persistent background service:
 
 ```bash
 chmod +x script/install-service
