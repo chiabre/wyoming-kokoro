@@ -1,4 +1,27 @@
 #!/usr/bin/env bash
-# Ensures the virtual env is used even when called by systemd
-source "$(dirname "$0")/../.venv/bin/activate"
-exec python3 "$(dirname "$0")/../wyoming_kokoro.py" "$@"
+set -e
+
+# 1. Setup Paths
+# Get the directory where THIS script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# Get the project root (one level up from script/)
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
+SCRIPT_PATH="$PROJECT_ROOT/wyoming_kokoro.py"
+
+# 2. Safety Check
+if [ ! -f "$VENV_PYTHON" ]; then
+    echo "❌ Error: Virtual environment not found. Please run setup first."
+    exit 1
+fi
+
+echo "🚀 Starting Kokoro Wyoming TTS..."
+
+# 3. Execution
+# 'exec' replaces the bash process with the python process (better for memory/signals)
+exec "$VENV_PYTHON" "$SCRIPT_PATH" \
+    --uri tcp://0.0.0.0:10200 \
+    --voice af_heart \
+    --speed 1.0 \
+    "$@"
