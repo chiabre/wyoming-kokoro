@@ -20,7 +20,7 @@ The setup script handles the heavy lifting: installing system dependencies, conf
 
 ```bash
 git clone https://github.com/chiabre/wyoming-kokoro.git
-cd kokoro-wyoming-gpu
+cd wyoming-kokoro
 chmod +x script/setup
 ./script/setup
 ```
