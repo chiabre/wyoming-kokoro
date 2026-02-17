@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+.venv/
+*.pyc
+
+# Kokoro Models (Too large for Git)
+*.onnx
+*.bin
+
+# OS
+.DS_Store
