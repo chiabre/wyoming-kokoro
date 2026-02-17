@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Automatically creates and starts the systemd service
+SERVICE_PATH="/etc/systemd/system/wyoming-kokoro.service"
+WORKING_DIR=$(pwd)
+
+sudo bash -c "cat > $SERVICE_PATH" <<EOF
+[Unit]
+Description=Wyoming Kokoro GPU
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$WORKING_DIR
+Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+ExecStart=$WORKING_DIR/.venv/bin/python3 wyoming_kokoro.py --uri tcp://0.0.0.0:10200
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable wyoming-kokoro
+sudo systemctl start wyoming-kokoro
+echo "Service installed and started!"
