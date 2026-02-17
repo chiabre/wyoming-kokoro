@@ -20,7 +20,7 @@ This repository is hardware-intelligent. It detects your environment and optimiz
 Clone the repo and run the setup script. It will detect your hardware and install either `onnxruntime-gpu` or the `standard onnxruntime`.
 
 ```bash
-git clone https://github.com/your-username/kokoro-wyoming-gpu.git
+git clone https://github.com/chiabre/kokoro-wyoming-gpu.git
 cd kokoro-wyoming-gpu
 chmod +x script/setup
 ./script/setup
