@@ -92,16 +92,21 @@ class KokoroWyomingHandler(AsyncEventHandler):
         if event.type == "synthesize":
             synth = Synthesize.from_event(event)
             voice = synth.voice.name if synth.voice else self.default_voice
+            
+            # Map language for the engine
             engine_lang = "en-us"
             if voice.startswith("jf"): engine_lang = "ja"
             elif voice.startswith("zf"): engine_lang = "zh"
             elif voice.startswith("ff"): engine_lang = "fr"
             
             try:
+                # create() returns (samples, sample_rate)
                 samples, sample_rate = self.kokoro.create(
                     synth.text, voice=voice, speed=self.speed, lang=engine_lang
                 )
+                # Convert float32 samples to int16 PCM
                 audio_data = (samples * 32767).astype("int16").tobytes()
+                
                 await self.write_event(AudioStart(rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioChunk(audio=audio_data, rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
@@ -124,9 +129,18 @@ async def main():
     parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
 
+    # Model path logic
     model_path = args.model or os.path.join(args.data_dir, "kokoro-v1.0.onnx")
-    voices_path = args.voices or os.path.join(args.data_dir, "voices-v1.0.bin")
+    
+    # Voice path logic: Try common names if not provided
+    if args.voices:
+        voices_path = args.voices
+    else:
+        v1_path = os.path.join(args.data_dir, "voices-v1.0.bin")
+        v_simple_path = os.path.join(args.data_dir, "voices.bin")
+        voices_path = v1_path if os.path.exists(v1_path) else v_simple_path
 
+    # Provider Handling for v0.5.0 via environment variables
     available = ort.get_available_providers()
     if args.cpu:
         provider = "CPUExecutionProvider"
@@ -135,12 +149,22 @@ async def main():
     else:
         provider = "CPUExecutionProvider"
     
+    os.environ["ONNX_PROVIDER"] = provider
+    
     _LOGGER.info(f"Hardware: {provider}")
     _LOGGER.info(f"Model: {model_path}")
+    _LOGGER.info(f"Voices: {voices_path}")
 
-    kokoro = Kokoro(model_path, voices_path, provider=provider)
+    # Kokoro __init__ no longer takes 'provider' keyword in v0.5.0
+    kokoro = Kokoro(model_path, voices_path)
+    
     server = AsyncServer.from_uri(args.uri)
+    _LOGGER.info(f"Ready. Listening on {args.uri}")
+    
     await server.run(lambda r, w: KokoroWyomingHandler(kokoro, args.voice, args.speed, r, w))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
