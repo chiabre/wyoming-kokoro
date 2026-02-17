@@ -17,4 +17,6 @@ else
     pip install onnxruntime kokoro-onnx wyoming
 fi
 
-echo "✅ Setup complete!"
+mkdir -p data
+
+echo "✅ Setup complete. Don't forget to download your models into the /data folder!"
