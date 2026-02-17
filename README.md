@@ -29,12 +29,33 @@ chmod +x script/setup
 ### 2. Download Model Files
 Download the essential model and voice database into the project root:
 
-```bash
-# Download the Kokoro ONNX model
-wget -O data/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+#### 1. Always download the voice metadata first
 
-# Download the voice metadata
+```bash
 wget -O data/voices-v1.0.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+```
+
+#### 2. Download the ONNX model (Choose ONE based on your hardware)
+
+##### OPTION A: For NVIDIA GPU (Recommended) 
+P16 is 2x smaller and faster on GPUs with virtually no quality loss.
+
+```bash
+wget -O data/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx
+```
+
+##### OPTION B: For Standard CPU (Balanced)
+Standard FP32 model. Best compatibility across all systems.
+
+```bash
+wget -O data/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+```
+
+##### OPTION C: For Low-Power CPU (Raspberry Pi / Thin Clients)
+INT8 is the fastest for CPUs but may have slight "robotic" artifacts.
+
+```bash
+# wget -O data/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx
 ```
 
 ## 🚀 Running the Service
