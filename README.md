@@ -1,23 +1,22 @@
 # 🎙️ Wyoming Kokoro TTS (GPU/CPU)
 
-[Wyoming Protocol](https://github.com/rhasspy/wyoming) server for the [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) TTS engine, featuring automatic NVIDIA GPU acceleration / CPU fallback.
+[Wyoming Protocol](https://github.com/rhasspy/wyoming) server for high-speed local Text-to-Speech using [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) engine optimized for Home Assistant voice pipelines.
 
 ## ⚡ Hardware Selection
 
-This repository is hardware-intelligent. It detects your environment and optimizes the engine accordingly.
+This repository is hardware-intelligent and distro-aware. During setup, it detects your OS (Debian/Ubuntu) and GPU status to automate the CUDA 12.6 & cuDNN 9.x installation.
 
 | Feature | 🟢 GPU Mode (Recommended) | 🔵 CPU Mode |
 | :--- | :--- | :--- |
 | **Performance** | Near-instant (sub-300ms latency) | Balanced (~1-3s latency) |
 | **Requirements** | NVIDIA GPU + Driver 550+ | Any modern x86_64 / ARM64 CPU |
-| **Libraries** | CUDA 12.x & cuDNN 9.x | No extra drivers required |
 
 ---
 
 ## ⚙️ Installation
 
 ### 1. Setup the Environment
-Clone the repo and run the setup script. It will detect your hardware and install either `onnxruntime-gpu` or the `standard onnxruntime`.
+The setup script handles the heavy lifting: installing system dependencies, configuring NVIDIA repositories for your specific Linux distro, and creating a virtual environment.
 
 ```bash
 git clone https://github.com/chiabre/kokoro-wyoming-gpu.git
@@ -25,6 +24,12 @@ cd kokoro-wyoming-gpu
 chmod +x script/setup
 ./script/setup
 ```
+
+> [!IMPORTANT]
+> **GPU Users:** After the setup script finishes, you **must** run the command below (or restart your terminal) to activate the new CUDA paths in your current session:
+> ```bash
+> source ~/.bashrc
+> ```
 
 ### 2. Download Model Files
 Download the essential model and voice database into the project root:
@@ -80,3 +85,7 @@ To run this as a persistent background service:
 chmod +x script/install-service
 ./script/install-service
 ```
+
+### Manage the service:
+- Logs: journalctl -u wyoming-kokoro-asr -f
+- Restart: sudo systemctl restart wyoming-kokoro
