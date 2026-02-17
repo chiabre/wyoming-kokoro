@@ -3,41 +3,36 @@ set -e
 
 echo "--- Kokoro Wyoming TTS Setup ---"
 
-# 1. Detect Distro Info
 DISTRO=$(. /etc/os-release; echo "$ID")
 VERSION_ID=$(. /etc/os-release; echo "$VERSION_ID" | tr -d '.')
 ARCH="x86_64"
 
-# 2. Base System dependencies
 echo "📦 Installing system dependencies..."
 sudo apt-get update && sudo apt-get install -y espeak-ng python3-venv wget gnupg2
 
-# 3. GPU / CUDA Setup
 if lspci | grep -i nvidia &> /dev/null; then
     echo "🚀 NVIDIA GPU Detected. Setting up repository for $DISTRO..."
     
-    # Map Distro to NVIDIA Repo Format
     case "$DISTRO" in
         debian) REPO_NAME="debian${VERSION_ID}" ;;
         ubuntu) REPO_NAME="ubuntu${VERSION_ID}" ;;
-        *) echo "❌ Unsupported Distro for auto-repo: $DISTRO"; exit 1 ;;
+        *) echo "❌ Unsupported Distro: $DISTRO"; exit 1 ;;
     esac
 
-    # Download and install NVIDIA keyring dynamically
     wget -q "https://developer.download.nvidia.com/compute/cuda/repos/${REPO_NAME}/${ARCH}/cuda-keyring_1.1-1_all.deb" -O cuda-keyring.deb
     sudo dpkg -i cuda-keyring.deb
     rm cuda-keyring.deb
     
     sudo apt update
-    
-    echo "Installing CUDA Toolkit 12.6 and cuDNN 9..."
     sudo apt-get -y install cuda-toolkit-12-6 cudnn9-cuda-12
-    
-    # Update environment variables
+
     if ! grep -q "/usr/local/cuda/bin" ~/.bashrc; then
+        echo -e "\n# NVIDIA CUDA and cuDNN paths" >> ~/.bashrc
         echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
         echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+        echo "✅ CUDA paths added to ~/.bashrc"
     fi
+    
     export PATH=/usr/local/cuda/bin:$PATH
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
     
@@ -47,7 +42,6 @@ else
     GPU_INSTALL=false
 fi
 
-# 4. Virtual Environment Setup
 echo "🐍 Creating virtual environment..."
 python3 -m venv .venv
 source .venv/bin/activate
@@ -61,4 +55,11 @@ fi
 
 mkdir -p data
 
+echo "-------------------------------------------------------"
 echo "✅ Setup complete for $DISTRO $VERSION_ID!"
+if [ "$GPU_INSTALL" = true ]; then
+    echo "🔍 SANITY CHECK:"
+    nvcc --version | grep "release" || echo "⚠️ nvcc not in PATH yet."
+    ls /usr/local/cuda/lib64/libcudnn.so.9* &> /dev/null && echo "✅ cuDNN 9 found."
+fi
+echo "-------------------------------------------------------"
