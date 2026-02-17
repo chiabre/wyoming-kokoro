@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+echo "🔄 Updating Kokoro Wyoming TTS..."
+
+# 1. Library updates
+"$PROJECT_ROOT/.venv/bin/python3" -m pip install --upgrade pip wyoming kokoro-onnx onnxruntime-gpu
+
+# 2. Model Integrity Check
+# We check if the files exist. If you want to FORCE a redownload of a new version, 
+# you would delete the local file first.
+if [ ! -f "$PROJECT_ROOT/data/kokoro-v1.0.onnx" ]; then
+    echo "⚠️ Model missing! Re-running download..."
+    # Insert your preferred wget command from the README here
+fi
+
+echo "🚀 Restarting service..."
+sudo systemctl restart wyoming-kokoro
+echo "✅ Done!"
