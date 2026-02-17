@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e
+
+# 1. Install system dependencies
+echo "Installing system dependencies..."
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y \
+    python3-venv \
+    python3-pip \
+    espeak-ng
+
+# 2. Setup Virtual Environment
+echo "Setting up virtual environment..."
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install Python packages
+echo "Installing Python dependencies..."
+pip install --upgrade pip
+pip install onnxruntime-gpu kokoro-onnx wyoming numpy
+
+echo "Setup complete! Don't forget to download your .onnx and .bin files."
