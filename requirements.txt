@@ -1,0 +1,4 @@
+kokoro-onnx>=0.3.0
+onnxruntime-gpu>=1.17.0
+wyoming>=1.5.0
+numpy<2.0.0
