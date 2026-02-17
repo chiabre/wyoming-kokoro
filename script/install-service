@@ -1,42 +1,49 @@
 #!/usr/bin/env bash
-# Automatically creates and starts the systemd service
-SERVICE_PATH="/etc/systemd/system/wyoming-kokoro.service"
-# Get the absolute path of the directory where this script is located
-ABS_PATH=$(cd "$(dirname "$0")/.." && pwd)
-# Get the current username
-CURRENT_USER=$(whoami)
+set -e
 
-echo "Installing Wyoming Kokoro service for user: $CURRENT_USER"
-echo "Project directory: $ABS_PATH"
+SERVICE_NAME="wyoming-kokoro"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-sudo bash -c "cat > $SERVICE_PATH" <<EOF
+# Detect the actual user even if run with sudo
+REAL_USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
+REAL_GROUP=$(id -gn "$REAL_USER")
+
+echo "🛠 Installing $SERVICE_NAME for user: $REAL_USER"
+
+sudo bash -c "cat > /etc/systemd/system/$SERVICE_NAME.service" <<EOF
 [Unit]
 Description=Wyoming Kokoro TTS
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-User=$CURRENT_USER
-WorkingDirectory=$ABS_PATH
-# Default environment variables
-Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
-Environment="KOKORO_ARGS=--uri tcp://0.0.0.0:10200"
+User=$REAL_USER
+Group=$REAL_GROUP
+WorkingDirectory=$PROJECT_ROOT
 
-# Using the variable in ExecStart
-# We use script/run because it handles venv activation internally
-ExecStart=$ABS_PATH/script/run \$KOKORO_ARGS
+# Ensure GPU libraries are visible to the service
+Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+Environment="PYTHONUNBUFFERED=1"
+
+# We call the 'run' script which handles venv internally
+ExecStart=$PROJECT_ROOT/script/run
 Restart=always
-RestartSec=3
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+# Set permissions and refresh systemd
+sudo chmod 644 "/etc/systemd/system/$SERVICE_NAME.service"
 sudo systemctl daemon-reload
-sudo systemctl enable wyoming-kokoro
-sudo systemctl start wyoming-kokoro
+sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl restart "$SERVICE_NAME"
 
 echo "-------------------------------------------------------"
-echo "✅ Service installed and started!"
-echo "Check status: sudo systemctl status wyoming-kokoro"
-echo "View logs:    journalctl -u wyoming-kokoro -f"
+echo "✅ $SERVICE_NAME installed and started!"
+echo "Check status: sudo systemctl status $SERVICE_NAME"
+echo "View logs:    journalctl -u $SERVICE_NAME -f"
+echo "-------------------------------------------------------"
