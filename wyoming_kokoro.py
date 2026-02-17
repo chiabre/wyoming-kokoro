@@ -79,13 +79,20 @@ class KokoroWyomingHandler(AsyncEventHandler):
             for v in self.kokoro.get_voices():
                 pretty_name, lang_code = get_voice_metadata(v)
                 voice_list.append({
-                    "name": v, "description": pretty_name,
-                    "languages": [lang_code], "installed": True,
-                    "attribution": {"name": "hexgrad", "url": ""}
+                    "name": v, 
+                    "description": pretty_name,
+                    "languages": [lang_code], 
+                    "installed": True,
+                    "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"}
                 })
+            
+            # Updated info event with required attribution for Home Assistant compatibility
             await self.write_event(Event(type="info", data={"tts": [{
-                "name": "kokoro", "description": "Kokoro TTS",
-                "installed": True, "voices": voice_list
+                "name": "kokoro", 
+                "description": "Kokoro TTS",
+                "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"},
+                "installed": True, 
+                "voices": voice_list
             }]}))
             return True
 
