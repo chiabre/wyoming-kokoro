@@ -83,7 +83,7 @@ python3 -m wyoming_kokoro --model data/kokoro-v1.0.fp16.onnx
 python3 -m wyoming_kokoro --cpu --speed 1.1
 ```
 #### ⚙️ Configuration Options
-These parameters match the latest wyoming-kokoro implementation. If no model or voices file is specified, the server will auto-detect the first available files in your --data-dir.
+These parameters match the latest wyoming-kokoro implementation. If no model or voices file is specified, the server will auto-detect the first available files in your `--data-dir`.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
