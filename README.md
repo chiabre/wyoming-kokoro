@@ -93,7 +93,7 @@ These parameters match the latest wyoming-kokoro implementation. If no model or 
 | `--voices` | Optional | *Auto-detect* | Explicit path to the `voices.bin` file.  |
 | `--voice` | Optional | `af_heart` | Default voice if none is requested by the client. |
 | `--speed` | Optional | `1.0` | Global speed multiplier for speech synthesis. |
-| `--cpu` | Flag | `False` | Force CPU inference even if a GPU is detected. |
+| `--cpu` | Optional | `False` | Force CPU inference even if a GPU is detected. |
 
 > [!IMPORTANT]
 > The server *Auto-detect* for model and voices selects the first `.onnx` and `.bin` files it finds in the data directory by sorting all matches alphabetically.
