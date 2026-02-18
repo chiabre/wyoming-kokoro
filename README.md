@@ -41,11 +41,11 @@ Kokoro-82M family. For the best balance of speed and quality use **v1.0 FP16** m
 > [!IMPORTANT]
 > Always ensure the model version (e.g., v1.0) matches the voices version. Using v1.0 models with v0.19 voices will result in corrupted audio output.
 
-| File Type | Version | Download Link | Description | Run command |
-| :--- | :--- | :--- | :--- |
-| **Model** | v1.0 (FP8) | Fastest. Extreme speed for CPUs (88MB). | `--model data/kokoro-v1.0.onnx` |
-| **Model** | v1.0 (FP16) | **Recommended.** Balanced speed/size (160MB). | `--model data/kokoro-v1.0.fp16.onnx` |
-| **Model** | v1.0 (FP32) | Original precision (320MB). Highest compatibility. | `--model data/kokoro-v1.0.int8.onnx` |
+| Model Name | Version | Precision | RAM | Description | Filename |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Kokoro-82M | v1.0 | Int8 | ~350MB | **Fastest.** Best for Raspberry Pi/CPUs. | `kokoro-v1.0.int8.onnx` |
+| Kokoro-82M | v1.0 | FP16 | ~500MB | **Recommended.** Best for NVIDIA GPUs. | `kokoro-v1.0.fp16.onnx` |
+| Kokoro-82M | v1.0 | FP32 | ~800MB | **Original.** Highest compatibility. | `kokoro-v1.0.onnx` |
 
 #### 1.Download Instructions
 
