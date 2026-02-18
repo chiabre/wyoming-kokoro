@@ -16,9 +16,6 @@ This repository is hardware-intelligent and distro-aware. During setup, it detec
 | **Performance** | Near-instant (sub-300ms latency) | Balanced (~1-3s latency) |
 | **Requirements** | NVIDIA GPU + Driver 550+ | Any modern x86_64 / ARM64 CPU |
 
----
-
-
 ## ⚙️ Installation
 
 ### 1. Setup the Environment
@@ -39,7 +36,7 @@ chmod +x script/setup
 
 ### 2. Models
 
-Kokoro-82M famil. For the best balance of speed and quality use **v1.0 FP16** model.
+Kokoro-82M family. For the best balance of speed and quality use **v1.0 FP16** model.
 
 > [!IMPORTANT]
 > Always ensure the model version (e.g., v1.0) matches the voices version. Using v1.0 models with v0.19 voices will result in corrupted audio output.
