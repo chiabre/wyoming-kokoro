@@ -11,7 +11,7 @@ echo "📦 Installing system dependencies..."
 sudo apt-get update && sudo apt-get install -y espeak-ng python3-venv wget gnupg2
 
 if nvidia-smi &> /dev/null; then
-    echo "🚀 NVIDIA GPU Detected. Setting up repository for $DISTRO..."
+    echo "🚀 NVIDIA GPU Driver Detected. Setting up repository for $DISTRO..."
     
     case "$DISTRO" in
         debian) REPO_NAME="debian${VERSION_ID}" ;;
@@ -39,7 +39,7 @@ if nvidia-smi &> /dev/null; then
     
     GPU_INSTALL=true
 else
-    echo "🐌 No GPU detected. Installing CPU requirements..."
+    echo "🐌 No NVIDIA GPU Driver detected. Installing CPU requirements..."
     GPU_INSTALL=false
 fi
 
