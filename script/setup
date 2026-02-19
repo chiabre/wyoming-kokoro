@@ -10,7 +10,7 @@ ARCH="x86_64"
 echo "📦 Installing system dependencies..."
 sudo apt-get update && sudo apt-get install -y espeak-ng python3-venv wget gnupg2
 
-if lspci | grep -i nvidia &> /dev/null; then
+if nvidia-smi &> /dev/null; then
     echo "🚀 NVIDIA GPU Detected. Setting up repository for $DISTRO..."
     
     case "$DISTRO" in
