@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 import os
+import time  # Added for timing debug info
 from pathlib import Path
 import numpy as np
 import onnxruntime as ort
@@ -11,6 +12,7 @@ from wyoming.event import Event
 from wyoming.tts import Synthesize
 from wyoming.audio import AudioStart, AudioChunk, AudioStop
 
+# Initial logging setup (will be overridden in main)
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +77,8 @@ class KokoroWyomingHandler(AsyncEventHandler):
         self.speed = speed
 
     async def handle_event(self, event: Event) -> bool:
+        _LOGGER.debug("Received event: %s", event.type)
+        
         if event.type == "describe":
             voice_list = []
             for v in self.kokoro.get_voices():
@@ -105,15 +109,22 @@ class KokoroWyomingHandler(AsyncEventHandler):
             elif voice.startswith("zf"): engine_lang = "zh"
             elif voice.startswith("ff"): engine_lang = "fr"
             
+            _LOGGER.debug("Synthesizing: '%s' using voice %s (%s)", synth.text, voice, engine_lang)
+            
             try:
+                start_time = time.perf_counter()
                 samples, sample_rate = self.kokoro.create(
                     synth.text, voice=voice, speed=self.speed, lang=engine_lang
                 )
+                end_time = time.perf_counter()
+                _LOGGER.debug("Inference took %.2f seconds", end_time - start_time)
+
                 audio_data = (samples * 32767).astype("int16").tobytes()
                 
                 await self.write_event(AudioStart(rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioChunk(audio=audio_data, rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
+                _LOGGER.debug("Audio events sent successfully")
             except Exception as e:
                 _LOGGER.error(f"Synthesis error: {e}")
             return False
@@ -131,25 +142,30 @@ async def main():
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging") # Added flag
     args = parser.parse_args()
+
+    # Apply debug logging level if requested
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        _LOGGER.debug("Debug logging enabled")
 
     # --- Dynamic Discovery Logic ---
     data_path = Path(args.data_dir)
 
-    # 1. Model resolution: Param > Auto-detect first .onnx > Default fallback
+    # 1. Model resolution
     if args.model:
         model_path = args.model
     else:
         onnx_files = sorted(list(data_path.glob("*.onnx")))
         model_path = str(onnx_files[0]) if onnx_files else os.path.join(args.data_dir, "kokoro-v1.0.onnx")
 
-    # 2. Voice resolution: Param > Auto-detect first .bin > Default fallback
+    # 2. Voice resolution
     if args.voices:
         voices_path = args.voices
     else:
         bin_files = sorted(list(data_path.glob("*.bin")))
         voices_path = str(bin_files[0]) if bin_files else os.path.join(args.data_dir, "voices-v1.0.bin")
-    # ------------------------------
 
     # Provider Handling
     available = ort.get_available_providers()
@@ -166,7 +182,6 @@ async def main():
     _LOGGER.info(f"Model: {model_path}")
     _LOGGER.info(f"Voices: {voices_path}")
 
-    # Check existence before loading to avoid cryptic errors
     if not os.path.exists(model_path):
         _LOGGER.error(f"Model file not found: {model_path}")
         return
