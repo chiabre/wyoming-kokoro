@@ -51,13 +51,12 @@ echo "🐍 Setting up virtual environment..."
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip wheel
+pip install -r "$PROJECT_ROOT/requirements.txt"
 
 if [ "$GPU_INSTALL" = true ]; then
     echo "🎮 Installing GPU requirements..."
-    pip install -r "$PROJECT_ROOT/requirements-gpu.txt"
-else
-    echo "💻 Installing CPU requirements..."
-    pip install -r "$PROJECT_ROOT/requirements.txt"
+    pip uninstall -y onnxruntime || true
+    pip install --no-cache-dir onnxruntime-gpu==1.25.1
 fi
 
 mkdir -p data
