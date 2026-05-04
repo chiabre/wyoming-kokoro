@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import time
+import re
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,34 @@ logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
 # -------------------------------------------------
-# VOICE METADATA
+# 🔧 PHONEMIZER NOISE REDUCTION (SAFE ADDITION)
+# -------------------------------------------------
+logging.getLogger("phonemizer").setLevel(logging.ERROR)
+
+# -------------------------------------------------
+# TEXT NORMALIZATION (NEW - CRITICAL FIX)
+# -------------------------------------------------
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+
+    # collapse whitespace
+    text = " ".join(text.split())
+
+    # fix duplicated words (ASR artifact)
+    text = re.sub(r"\b(\w+)( \1\b)+", r"\1", text)
+
+    # fix spacing before punctuation
+    text = re.sub(r"\s+([?.!,])", r"\1", text)
+
+    # normalize weird multiple punctuation
+    text = re.sub(r"([?.!,]){2,}", r"\1", text)
+
+    return text.strip()
+
+
+# -------------------------------------------------
+# VOICE METADATA (UNCHANGED)
 # -------------------------------------------------
 VOICE_TRAITS = {
     "af_alloy": {"gender": "Female", "tone": "Neutral"},
@@ -58,9 +86,6 @@ VOICE_TRAITS = {
     "ff_siwis": {"gender": "Female", "tone": "French Soft"},
 }
 
-# -------------------------------------------------
-# GLOBAL LANGUAGE SET (IMPORTANT FOR HOME ASSISTANT)
-# -------------------------------------------------
 SUPPORTED_LANGS = sorted({
     "en-us",
     "en-gb",
@@ -69,27 +94,23 @@ SUPPORTED_LANGS = sorted({
     "fr-fr",
 })
 
+
 def resolve_voice(v_code: str):
     lang_map = {
         "af": "en-us",
         "am": "en-us",
-
         "bf": "en-gb",
         "bm": "en-gb",
-
         "jf": "ja",
         "jm": "ja",
-
         "zf": "zh-cn",
         "zm": "zh-cn",
-
         "ff": "fr-fr",
     }
 
     prefix = v_code[:2]
     lang = lang_map.get(prefix, "en-us")
 
-    # strict normalization (IMPORTANT for HA)
     if lang not in SUPPORTED_LANGS:
         lang = "en-us"
 
@@ -118,9 +139,6 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
     async def handle_event(self, event: Event) -> bool:
 
-        # -------------------------
-        # DESCRIBE (FIXED FOR HA)
-        # -------------------------
         if event.type == "describe":
             voices = []
 
@@ -138,18 +156,13 @@ class KokoroWyomingHandler(AsyncEventHandler):
                     }
                 })
 
-            # IMPORTANT: include global language list
             await self.write_event(Event(type="info", data={
                 "tts": [{
                     "name": "kokoro",
                     "description": "Kokoro TTS",
-
-                    # 🔥 THIS IS WHAT FIXES HA LANGUAGE FILTERING
                     "languages": SUPPORTED_LANGS,
-
                     "installed": True,
                     "voices": voices,
-
                     "attribution": {
                         "name": "hexgrad",
                         "url": "https://github.com/hexgrad/Kokoro-82M"
@@ -158,9 +171,6 @@ class KokoroWyomingHandler(AsyncEventHandler):
             }))
             return True
 
-        # -------------------------
-        # SYNTHESIZE
-        # -------------------------
         if event.type == "synthesize":
             synth = Synthesize.from_event(event)
             voice = synth.voice.name if synth.voice else self.default_voice
@@ -170,8 +180,20 @@ class KokoroWyomingHandler(AsyncEventHandler):
             try:
                 start = time.perf_counter()
 
+                # -------------------------------------------------
+                # 🔧 FIXED INPUT PIPELINE (NORMALIZATION ADDED)
+                # -------------------------------------------------
+                clean_text = normalize_text(synth.text)
+
+                if not clean_text or len(clean_text) < 2:
+                    _LOGGER.warning("Skipping empty/invalid text")
+                    return True
+
+                _LOGGER.debug("RAW: %s", synth.text)
+                _LOGGER.debug("CLEAN: %s", clean_text)
+
                 samples, sr = self.kokoro.create(
-                    synth.text,
+                    clean_text,
                     voice=voice,
                     speed=self.speed,
                     lang=lang,
@@ -185,9 +207,9 @@ class KokoroWyomingHandler(AsyncEventHandler):
                 await self.write_event(AudioChunk(audio=audio, rate=sr, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
 
-            except Exception as e:
+            except Exception:
                 _LOGGER.exception("Synthesis error")
-                await self.write_event(Event(type="error", data={"message": str(e)}))
+                await self.write_event(Event(type="error", data={"message": "TTS failure"}))
                 return False
 
             return True
@@ -196,7 +218,7 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
 
 # -------------------------------------------------
-# MAIN
+# MAIN (UNCHANGED STRUCTURE)
 # -------------------------------------------------
 async def main():
 
