@@ -139,7 +139,7 @@ journalctl -u wyoming-kokoro -f
 - Restart:
   
 ```bash
-sudo systemctl restart wyoming-kokoro
+systemctl restart wyoming-kokoro
 ```
 ---
 
