@@ -62,7 +62,7 @@ fi
 
 mkdir -p data
 
-chmod +x "$SCRIPT_DIR/run" "$SCRIPT_DIR/install-service"
+chmod +x "$SCRIPT_DIR/run" "$SCRIPT_DIR/install-service" "$SCRIPT_DIR/model"
 
 echo "-------------------------------------------------------"
 echo "✅ Setup complete for $DISTRO $VERSION_ID!"

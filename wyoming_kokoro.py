@@ -2,17 +2,18 @@ import argparse
 import asyncio
 import logging
 import os
-import time  # Added for timing debug info
+import time
 from pathlib import Path
+
 import numpy as np
 import onnxruntime as ort
 from kokoro_onnx import Kokoro
+
 from wyoming.server import AsyncServer, AsyncEventHandler
 from wyoming.event import Event
 from wyoming.tts import Synthesize
 from wyoming.audio import AudioStart, AudioChunk, AudioStop
 
-# Initial logging setup (will be overridden in main)
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,24 +51,70 @@ VOICE_TRAITS = {
     "ff_siwis": {"gender": "Female", "tone": "French Soft"},
 }
 
-def get_voice_metadata(v_code):
-    name_parts = v_code.split("_")
-    short_name = name_parts[-1].capitalize()
+SUPPORTED_LANGS = {
+    "en-us", "en-gb", "ja", "zh", "fr-fr", "hi", "it", "pt"
+}
+
+
+def resolve_voice(v_code: str):
+    """
+    Unified resolver for:
+    - language mapping
+    - metadata naming
+    - synthesis routing safety
+    """
+
     lang_map = {
-        "af": "en-us", "am": "en-us", "bf": "en-gb", "bm": "en-gb",
-        "jf": "ja", "jm": "ja", "zf": "zh", "zm": "zh", "ff": "fr",
-        "hf": "hi", "hm": "hi", "if": "it", "im": "it", "pf": "pt",
-        "pm": "pt", "ef": "en", "em": "en"
+        "af": "en-us",
+        "am": "en-us",
+        "ef": "en-us",
+        "em": "en-us",
+
+        "bf": "en-gb",
+        "bm": "en-gb",
+
+        "jf": "ja",
+        "jm": "ja",
+
+        "zf": "zh",
+        "zm": "zh",
+
+        "ff": "fr-fr",
+
+        "hf": "hi",
+        "hm": "hi",
+
+        "if": "it",
+        "im": "it",
+
+        "pf": "pt",
+        "pm": "pt",
     }
+
     prefix = v_code[:2]
-    lang_code = lang_map.get(prefix, "en-us")
+
+    lang = lang_map.get(prefix)
+    if lang is None:
+        _LOGGER.warning("Unknown voice prefix '%s', defaulting to en-us", prefix)
+        lang = "en-us"
+
+    if lang not in SUPPORTED_LANGS:
+        _LOGGER.warning("Unsupported resolved language %s, forcing en-us", lang)
+        lang = "en-us"
+
     traits = VOICE_TRAITS.get(v_code)
+
     if traits:
-        pretty_name = f"{short_name} ({traits['gender']}, {traits['tone']})"
+        pretty = f"{v_code.split('_')[-1].capitalize()} ({traits['gender']}, {traits['tone']})"
     else:
         gender = "Female" if "_f_" in v_code or prefix.endswith("f") else "Male"
-        pretty_name = f"{short_name} ({gender})"
-    return pretty_name, lang_code
+        pretty = f"{v_code.split('_')[-1].capitalize()} ({gender})"
+
+    return {
+        "language": lang,
+        "pretty_name": pretty,
+    }
+
 
 class KokoroWyomingHandler(AsyncEventHandler):
     def __init__(self, kokoro, default_voice, speed, *args, **kwargs):
@@ -77,59 +124,89 @@ class KokoroWyomingHandler(AsyncEventHandler):
         self.speed = speed
 
     async def handle_event(self, event: Event) -> bool:
-        _LOGGER.debug("Received event: %s", event.type)
-        
+
+        # -------------------------------------------------
+        # DESCRIBE
+        # -------------------------------------------------
         if event.type == "describe":
             voice_list = []
+
             for v in self.kokoro.get_voices():
-                pretty_name, lang_code = get_voice_metadata(v)
+                info = resolve_voice(v)
+
                 voice_list.append({
-                    "name": v, 
-                    "description": pretty_name,
-                    "languages": [lang_code], 
+                    "name": v,
+                    "description": info["pretty_name"],
+                    "languages": [info["language"]],
                     "installed": True,
-                    "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"}
+                    "attribution": {
+                        "name": "hexgrad",
+                        "url": "https://github.com/hexgrad/Kokoro-82M"
+                    }
                 })
-            
-            await self.write_event(Event(type="info", data={"tts": [{
-                "name": "kokoro", 
-                "description": "Kokoro TTS",
-                "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"},
-                "installed": True, 
-                "voices": voice_list
-            }]}))
+
+            await self.write_event(Event(type="info", data={
+                "tts": [{
+                    "name": "kokoro",
+                    "description": "Kokoro TTS",
+                    "installed": True,
+                    "voices": voice_list,
+                }]
+            }))
             return True
 
+        # -------------------------------------------------
+        # SYNTHESIZE
+        # -------------------------------------------------
         if event.type == "synthesize":
             synth = Synthesize.from_event(event)
             voice = synth.voice.name if synth.voice else self.default_voice
-            
-            engine_lang = "en-us"
-            if voice.startswith("jf"): engine_lang = "ja"
-            elif voice.startswith("zf"): engine_lang = "zh"
-            elif voice.startswith("ff"): engine_lang = "fr"
-            
-            _LOGGER.debug("Synthesizing: '%s' using voice %s (%s)", synth.text, voice, engine_lang)
-            
-            try:
-                start_time = time.perf_counter()
-                samples, sample_rate = self.kokoro.create(
-                    synth.text, voice=voice, speed=self.speed, lang=engine_lang
-                )
-                end_time = time.perf_counter()
-                _LOGGER.debug("Inference took %.2f seconds", end_time - start_time)
 
-                audio_data = (samples * 32767).astype("int16").tobytes()
-                
-                await self.write_event(AudioStart(rate=sample_rate, width=2, channels=1).event())
-                await self.write_event(AudioChunk(audio=audio_data, rate=sample_rate, width=2, channels=1).event())
+            voice_info = resolve_voice(voice)
+            engine_lang = voice_info["language"]
+
+            _LOGGER.debug(
+                "Synthesizing text='%s' voice=%s lang=%s",
+                synth.text, voice, engine_lang
+            )
+
+            try:
+                start = time.perf_counter()
+
+                samples, sample_rate = self.kokoro.create(
+                    synth.text,
+                    voice=voice,
+                    speed=self.speed,
+                    lang=engine_lang,
+                )
+
+                _LOGGER.debug("Inference took %.3fs", time.perf_counter() - start)
+
+                audio = (samples * 32767).astype("int16").tobytes()
+
+                await self.write_event(AudioStart(
+                    rate=sample_rate, width=2, channels=1
+                ).event())
+
+                await self.write_event(AudioChunk(
+                    audio=audio, rate=sample_rate, width=2, channels=1
+                ).event())
+
                 await self.write_event(AudioStop().event())
-                _LOGGER.debug("Audio events sent successfully")
+
             except Exception as e:
-                _LOGGER.error(f"Synthesis error: {e}")
-            return False
+                _LOGGER.exception("Synthesis error")
+                await self.write_event(Event(type="error", data={"message": str(e)}))
+                return False
+
+            return True
+
         return True
 
+
+# =========================================================
+# MAIN
+# =========================================================
 async def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     default_data = os.path.join(script_dir, "data")
@@ -137,64 +214,52 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--uri", default="tcp://0.0.0.0:10200")
     parser.add_argument("--data-dir", default=default_data)
-    parser.add_argument("--model", help="Path to ONNX file")
-    parser.add_argument("--voices", help="Path to voices.bin")
+    parser.add_argument("--model")
+    parser.add_argument("--voices")
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--cpu", action="store_true")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging") # Added flag
+    parser.add_argument("--debug", action="store_true")
+
     args = parser.parse_args()
 
-    # Apply debug logging level if requested
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-        _LOGGER.debug("Debug logging enabled")
 
-    # --- Dynamic Discovery Logic ---
     data_path = Path(args.data_dir)
 
-    # 1. Model resolution
-    if args.model:
-        model_path = args.model
-    else:
-        onnx_files = sorted(list(data_path.glob("*.onnx")))
-        model_path = str(onnx_files[0]) if onnx_files else os.path.join(args.data_dir, "kokoro-v1.0.onnx")
+    model_path = args.model or str(sorted(data_path.glob("*.onnx"))[0])
+    voices_path = args.voices or str(sorted(data_path.glob("*.bin"))[0])
 
-    # 2. Voice resolution
-    if args.voices:
-        voices_path = args.voices
-    else:
-        bin_files = sorted(list(data_path.glob("*.bin")))
-        voices_path = str(bin_files[0]) if bin_files else os.path.join(args.data_dir, "voices-v1.0.bin")
-
-    # Provider Handling
     available = ort.get_available_providers()
+
     if args.cpu:
         provider = "CPUExecutionProvider"
     elif "CUDAExecutionProvider" in available:
         provider = "CUDAExecutionProvider"
     else:
         provider = "CPUExecutionProvider"
-    
-    os.environ["ONNX_PROVIDER"] = provider
-    
-    _LOGGER.info(f"Hardware: {provider}")
-    _LOGGER.info(f"Model: {model_path}")
-    _LOGGER.info(f"Voices: {voices_path}")
 
-    if not os.path.exists(model_path):
-        _LOGGER.error(f"Model file not found: {model_path}")
-        return
-    if not os.path.exists(voices_path):
-        _LOGGER.error(f"Voices file not found: {voices_path}")
-        return
+    _LOGGER.info("Provider: %s", provider)
+    _LOGGER.info("Model: %s", model_path)
+    _LOGGER.info("Voices: %s", voices_path)
+
+    if not Path(model_path).exists():
+        raise FileNotFoundError(model_path)
+    if not Path(voices_path).exists():
+        raise FileNotFoundError(voices_path)
 
     kokoro = Kokoro(model_path, voices_path)
-    
+
     server = AsyncServer.from_uri(args.uri)
-    _LOGGER.info(f"Ready. Listening on {args.uri}")
-    
-    await server.run(lambda r, w: KokoroWyomingHandler(kokoro, args.voice, args.speed, r, w))
+    _LOGGER.info("Listening on %s", args.uri)
+
+    await server.run(
+        lambda r, w: KokoroWyomingHandler(
+            kokoro, args.voice, args.speed, r, w
+        )
+    )
+
 
 if __name__ == "__main__":
     try:

@@ -1,0 +1,106 @@
+echo "📥 Downloading Kokoro models (stable source)..."
+
+mkdir -p data
+
+BASE_URL="https://github.com/onnx-community/Kokoro-82M-v1.0-ONNX/releases/download/v1.0"
+
+# ----------------------------
+# Voices (required)
+# ----------------------------
+if [ ! -f "data/voices-v1.0.bin" ]; then
+    echo "🎤 Downloading voices..."
+    wget -q -O data/voices-v1.0.bin \
+        "$BASE_URL/voices-v1.0.bin"
+fi
+
+# ----------------------------
+# GPU CHECK
+# ----------------------------
+HAS_GPU=false
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+    if nvidia-smi >/dev/null 2>&1; then
+        HAS_GPU=true
+    fi
+fi
+
+echo ""
+if [ "$HAS_GPU" = true ]; then
+    echo "🚀 NVIDIA GPU detected (CUDA available)"
+else
+    echo "⚠️ No NVIDIA GPU detected (CPU-only system)"
+fi
+
+# ----------------------------
+# MODEL SELECTION (interactive)
+# ----------------------------
+echo ""
+echo "🧠 Choose Kokoro model:"
+echo "--------------------------------------------"
+echo "1) FP16 (Recommended GPU) - Fast + high quality"
+echo "   → Requires NVIDIA GPU + CUDA"
+echo ""
+echo "2) FP32 (CPU safe) - Most compatible"
+echo "   → Works everywhere, slower"
+echo ""
+echo "3) INT8 (Edge / low power) - Minimal CPU load"
+echo "   → Raspberry Pi / embedded systems"
+echo "--------------------------------------------"
+
+read -p "Enter choice [1-3] (default: 1): " MODEL_CHOICE
+
+# Default
+MODEL_FILE="kokoro-v1.0.fp16.onnx"
+MODEL_DESC="FP16 (GPU recommended)"
+
+case "$MODEL_CHOICE" in
+    2)
+        MODEL_FILE="kokoro-v1.0.onnx"
+        MODEL_DESC="FP32 (CPU safe)"
+        ;;
+    3)
+        MODEL_FILE="kokoro-v1.0.int8.onnx"
+        MODEL_DESC="INT8 (Edge optimized)"
+        ;;
+    *)
+        MODEL_FILE="kokoro-v1.0.fp16.onnx"
+        MODEL_DESC="FP16 (GPU recommended)"
+        ;;
+esac
+
+echo ""
+echo "📦 Selected model: $MODEL_DESC"
+
+# ----------------------------
+# GPU VALIDATION WARNING
+# ----------------------------
+if [[ "$MODEL_FILE" == *"fp16"* ]]; then
+    if [ "$HAS_GPU" = false ]; then
+        echo ""
+        echo "⚠️ WARNING: You selected FP16 (GPU model) but no NVIDIA GPU was detected."
+        echo "👉 This will fall back to CPU and be significantly slower."
+        echo ""
+        read -p "Continue anyway? (y/N): " CONFIRM_GPU
+
+        if [[ "$CONFIRM_GPU" != "y" && "$CONFIRM_GPU" != "Y" ]]; then
+            echo "🔄 Switching to FP32 CPU model..."
+
+            MODEL_FILE="kokoro-v1.0.onnx"
+            MODEL_DESC="FP32 (Auto fallback)"
+        fi
+    fi
+fi
+
+# ----------------------------
+# DOWNLOAD MODEL
+# ----------------------------
+if [ ! -f "data/$MODEL_FILE" ]; then
+    echo ""
+    echo "⬇️ Downloading $MODEL_FILE..."
+    wget -q -O "data/$MODEL_FILE" \
+        "$BASE_URL/$MODEL_FILE"
+fi
+
+echo ""
+echo "✅ Model ready: $MODEL_FILE"
+echo "✅ Voices ready: voices-v1.0.bin"
