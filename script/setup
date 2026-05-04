@@ -53,20 +53,16 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip wheel
 
 if [ "$GPU_INSTALL" = true ]; then
-    echo "🎮 Installing GPU-accelerated runtimes..."
-    # 1. Install GPU version first
-    pip install onnxruntime-gpu numpy
-    # 2. Install others. Pip will see onnxruntime-gpu satisfies 
-    # the requirements for kokoro-onnx.
-    pip install kokoro-onnx wyoming numpy
+    echo "🎮 Installing GPU requirements..."
+    pip install -r "$PROJECT_ROOT/requirements-gpu.txt"
 else
-    echo "💻 Installing CPU runtimes..."
-    pip install onnxruntime kokoro-onnx wyoming
+    echo "💻 Installing CPU requirements..."
+    pip install -r "$PROJECT_ROOT/requirements.txt"
 fi
 
 mkdir -p data
 
-chmod +x "$SCRIPT_DIR/run" "$SCRIPT_DIR/install-service"
+chmod +x "$SCRIPT_DIR/run" "$SCRIPT_DIR/install-service" "$SCRIPT_DIR/model"
 
 echo "-------------------------------------------------------"
 echo "✅ Setup complete for $DISTRO $VERSION_ID!"
