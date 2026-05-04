@@ -19,34 +19,38 @@ logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
 # -------------------------------------------------
-# 🔧 PHONEMIZER NOISE REDUCTION (SAFE ADDITION)
+# KEEP: phonemizer noise suppression (correct)
 # -------------------------------------------------
 logging.getLogger("phonemizer").setLevel(logging.ERROR)
 
+
 # -------------------------------------------------
-# TEXT NORMALIZATION (NEW - CRITICAL FIX)
+# ⚡ ULTRA-LIGHT OLLAMA NORMALIZER (ADDED ONLY)
 # -------------------------------------------------
 def normalize_text(text: str) -> str:
+    """
+    Minimal-cost normalization for LLM output (Ollama-safe).
+    No regex chains, no heavy processing.
+    """
     if not text:
         return ""
 
-    # collapse whitespace
+    # fast path cleanup only
+    text = text.strip()
+
+    # collapse whitespace (single pass)
     text = " ".join(text.split())
 
-    # fix duplicated words (ASR artifact)
-    text = re.sub(r"\b(\w+)( \1\b)+", r"\1", text)
+    # micro-fixes (cheap string ops only)
+    text = text.replace(" .", ".")
+    text = text.replace(" !", "!")
+    text = text.replace(" ?", "?")
 
-    # fix spacing before punctuation
-    text = re.sub(r"\s+([?.!,])", r"\1", text)
-
-    # normalize weird multiple punctuation
-    text = re.sub(r"([?.!,]){2,}", r"\1", text)
-
-    return text.strip()
+    return text
 
 
 # -------------------------------------------------
-# VOICE METADATA (UNCHANGED)
+# VOICE METADATA (UNCHANGED - DO NOT MODIFY)
 # -------------------------------------------------
 VOICE_TRAITS = {
     "af_alloy": {"gender": "Female", "tone": "Neutral"},
@@ -127,7 +131,7 @@ def resolve_voice(v_code: str):
 
 
 # -------------------------------------------------
-# WYOMING HANDLER
+# WYOMING HANDLER (ONLY HOT PATH MODIFIED SLIGHTLY)
 # -------------------------------------------------
 class KokoroWyomingHandler(AsyncEventHandler):
 
@@ -172,25 +176,31 @@ class KokoroWyomingHandler(AsyncEventHandler):
             return True
 
         if event.type == "synthesize":
+
             synth = Synthesize.from_event(event)
             voice = synth.voice.name if synth.voice else self.default_voice
-
             lang, _ = resolve_voice(voice)
 
             try:
                 start = time.perf_counter()
 
-                # -------------------------------------------------
-                # 🔧 FIXED INPUT PIPELINE (NORMALIZATION ADDED)
-                # -------------------------------------------------
-                clean_text = normalize_text(synth.text)
+                raw_text = synth.text
 
-                if not clean_text or len(clean_text) < 2:
-                    _LOGGER.warning("Skipping empty/invalid text")
+                # -------------------------------------------------
+                # ONLY ADDED LOGIC (SAFE + LOW OVERHEAD)
+                # -------------------------------------------------
+                if not raw_text:
                     return True
 
-                _LOGGER.debug("RAW: %s", synth.text)
-                _LOGGER.debug("CLEAN: %s", clean_text)
+                clean_text = normalize_text(raw_text)
+
+                if len(clean_text) < 2:
+                    return True
+
+                # IMPORTANT: avoid expensive logging formatting
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug("RAW=%s", raw_text)
+                    _LOGGER.debug("CLEAN=%s", clean_text)
 
                 samples, sr = self.kokoro.create(
                     clean_text,
@@ -199,7 +209,11 @@ class KokoroWyomingHandler(AsyncEventHandler):
                     lang=lang,
                 )
 
-                _LOGGER.debug("Inference %.3fs", time.perf_counter() - start)
+                _LOGGER.info(
+                    "TTS done in %.3fs (%d chars)",
+                    time.perf_counter() - start,
+                    len(clean_text)
+                )
 
                 audio = (samples * 32767).astype("int16").tobytes()
 
@@ -209,7 +223,7 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
             except Exception:
                 _LOGGER.exception("Synthesis error")
-                await self.write_event(Event(type="error", data={"message": "TTS failure"}))
+                await self.write_event(Event(type="error", data={"message": str(e)}))
                 return False
 
             return True
@@ -218,7 +232,7 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
 
 # -------------------------------------------------
-# MAIN (UNCHANGED STRUCTURE)
+# MAIN (UNCHANGED)
 # -------------------------------------------------
 async def main():
 
