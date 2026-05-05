@@ -10,51 +10,53 @@ ARCH="x86_64"
 echo "📦 Installing system dependencies..."
 sudo apt-get update && sudo apt-get install -y espeak-ng python3-venv wget gnupg2
 
-if nvidia-smi &> /dev/null; then
-    echo "🚀 NVIDIA GPU Driver Detected. Setting up repository for $DISTRO..."
-    
+# -------------------------------------------------
+# GPU detection
+# -------------------------------------------------
+GPU=false
+
+if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+    GPU=true
+fi
+
+if [ "$GPU" = true ]; then
+    echo "🚀 NVIDIA GPU detected"
+
     case "$DISTRO" in
         debian) REPO_NAME="debian${VERSION_ID}" ;;
         ubuntu) REPO_NAME="ubuntu${VERSION_ID}" ;;
-        *) echo "❌ Unsupported Distro: $DISTRO"; exit 1 ;;
+        *) echo "❌ Unsupported distro: $DISTRO"; exit 1 ;;
     esac
 
     wget -q "https://developer.download.nvidia.com/compute/cuda/repos/${REPO_NAME}/${ARCH}/cuda-keyring_1.1-1_all.deb" -O cuda-keyring.deb
     sudo dpkg -i cuda-keyring.deb
     rm cuda-keyring.deb
-    
+
     sudo apt update
-    sudo apt-get -y install cuda-toolkit-12-6 cudnn9-cuda-12
+    sudo apt-get install -y cuda-toolkit-12-6 cudnn9-cuda-12
 
-    if ! grep -q "/usr/local/cuda/bin" ~/.bashrc; then
-        echo -e "\n# NVIDIA CUDA and cuDNN paths" >> ~/.bashrc
-        echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
-        echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-        echo "✅ CUDA paths added to ~/.bashrc"
-    fi
-
-    # SESSION PATH UPDATE (For this script to finish correctly)
     export PATH=/usr/local/cuda/bin:$PATH
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-    
-    GPU_INSTALL=true
+
 else
-    echo "🐌 No NVIDIA GPU Driver detected. Installing CPU requirements..."
-    GPU_INSTALL=false
+    echo "🐌 CPU mode detected"
 fi
 
+# -------------------------------------------------
+# Python env
+# -------------------------------------------------
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_ROOT/.venv"
 
-echo "🐍 Setting up virtual environment..."
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
+
 pip install --upgrade pip wheel
 pip install -r "$PROJECT_ROOT/requirements.txt"
 
-if [ "$GPU_INSTALL" = true ]; then
-    echo "🎮 Installing GPU requirements..."
+if [ "$GPU" = true ]; then
+    echo "🎮 Installing GPU runtime"
     pip uninstall -y onnxruntime || true
     pip install --no-cache-dir onnxruntime-gpu==1.25.1
 fi
@@ -64,18 +66,5 @@ mkdir -p data
 chmod +x "$SCRIPT_DIR/run" "$SCRIPT_DIR/install-service" "$SCRIPT_DIR/model"
 
 echo "-------------------------------------------------------"
-echo "✅ Setup complete for $DISTRO $VERSION_ID!"
-if [ "$GPU_INSTALL" = true ]; then
-    echo "🔍 SANITY CHECK:"
-    if command -v nvcc >/dev/null 2>&1; then
-        nvcc --version | grep "release"
-    else
-        echo "⚠️ nvcc not in PATH yet."
-    fi
-    if ldconfig -p 2>/dev/null | grep -q libcudnn.so.9; then
-        echo "✅ cuDNN 9 is installed and registered."
-    else
-        echo "❌ cuDNN 9 not found in linker cache."
-    fi
-fi
+echo "✅ Setup complete"
 echo "-------------------------------------------------------"
