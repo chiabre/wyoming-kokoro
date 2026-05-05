@@ -33,7 +33,6 @@ def normalize_text(text: str) -> str:
     text = text.strip()
     text = " ".join(text.split())
 
-    # ultra-cheap punctuation fixes
     text = text.replace(" .", ".")
     text = text.replace(" !", "!")
     text = text.replace(" ?", "?")
@@ -95,7 +94,7 @@ def resolve_voice(v_code: str):
 
 
 # -------------------------------------------------
-# WYOMING HANDLER (OPTIMIZED)
+# WYOMING HANDLER (INSTRUMENTED)
 # -------------------------------------------------
 class KokoroWyomingHandler(AsyncEventHandler):
 
@@ -106,7 +105,6 @@ class KokoroWyomingHandler(AsyncEventHandler):
         self.speed = speed
         self.loop = loop
 
-        # warmup (CRITICAL for HA latency perception)
         try:
             self.kokoro.create("hello", voice=self.default_voice, speed=self.speed, lang="en-us")
         except Exception:
@@ -143,13 +141,20 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
         if event.type == "synthesize":
 
-            synth = Synthesize.from_event(event)
-            voice = self.default_voice
+            total_t0 = time.perf_counter()
 
+            synth = Synthesize.from_event(event)
+
+            voice = self.default_voice
             if synth.voice and getattr(synth.voice, "name", None):
                 voice = synth.voice.name
-                
+
             lang, _ = resolve_voice(voice)
+
+            # -------------------------
+            # PREPROCESS TIMING
+            # -------------------------
+            t_pre0 = time.perf_counter()
 
             raw_text = synth.text
             if not raw_text:
@@ -159,31 +164,70 @@ class KokoroWyomingHandler(AsyncEventHandler):
             if len(clean_text) < 2:
                 return True
 
-            start = time.perf_counter()
+            t_pre1 = time.perf_counter()
+
+            # -------------------------
+            # EXECUTION QUEUE DELAY
+            # -------------------------
+            t_queue0 = time.perf_counter()
 
             try:
-                # -------------------------------------------------
-                # OFFLOAD BLOCKING TTS TO THREAD (IMPORTANT FIX)
-                # -------------------------------------------------
-                samples, sr = await self.loop.run_in_executor(
-                    None,
-                    self.kokoro.create,
-                    clean_text,
-                    voice,
-                    self.speed,
-                    lang,
-                )
+                # -------------------------
+                # INFERENCE
+                # -------------------------
+                def _run():
+                    return self.kokoro.create(
+                        clean_text,
+                        voice,
+                        self.speed,
+                        lang,
+                    )
 
+                samples, sr = await self.loop.run_in_executor(None, _run)
+
+                t_inf1 = time.perf_counter()
+
+                # -------------------------
+                # AUDIO ENCODE
+                # -------------------------
                 audio = (samples * 32767).astype("int16").tobytes()
+
+                t_enc1 = time.perf_counter()
 
                 await self.write_event(AudioStart(rate=sr, width=2, channels=1).event())
                 await self.write_event(AudioChunk(audio=audio, rate=sr, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
 
+                t_emit1 = time.perf_counter()
+
+                # -------------------------
+                # FINAL LOG (FULL BREAKDOWN)
+                # -------------------------
                 _LOGGER.info(
-                    "TTS %.3fs | %d chars",
-                    time.perf_counter() - start,
-                    len(clean_text)
+                    "TTS TOTAL=%.3fs | text=%d",
+                    t_emit1 - total_t0,
+                    len(clean_text),
+                )
+
+                _LOGGER.debug(
+                    "  ├─ preprocess=%.3fs",
+                    t_pre1 - t_pre0,
+                )
+                _LOGGER.debug(
+                    "  ├─ queue=%.3fs",
+                    t_queue0 - t_pre1,
+                )
+                _LOGGER.debug(
+                    "  ├─ inference=%.3fs",
+                    t_inf1 - t_queue0,
+                )
+                _LOGGER.debug(
+                    "  ├─ encode=%.3fs",
+                    t_enc1 - t_inf1,
+                )
+                _LOGGER.debug(
+                    "  └─ emit=%.3fs",
+                    t_emit1 - t_enc1,
                 )
 
             except Exception as e:
@@ -197,7 +241,7 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
 
 # -------------------------------------------------
-# MAIN
+# MAIN (UNCHANGED)
 # -------------------------------------------------
 async def main():
 
