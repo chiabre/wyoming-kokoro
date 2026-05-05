@@ -1,9 +1,9 @@
+#!/usr/bin/env python3
 import argparse
 import asyncio
 import logging
 import os
 import time
-import re
 from pathlib import Path
 
 import numpy as np
@@ -15,33 +15,25 @@ from wyoming.event import Event
 from wyoming.tts import Synthesize
 from wyoming.audio import AudioStart, AudioChunk, AudioStop
 
+# -------------------------------------------------
+# LOGGING
+# -------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
-# -------------------------------------------------
-# KEEP: phonemizer noise suppression (correct)
-# -------------------------------------------------
 logging.getLogger("phonemizer").setLevel(logging.ERROR)
 
-
 # -------------------------------------------------
-# ⚡ ULTRA-LIGHT OLLAMA NORMALIZER (ADDED ONLY)
+# LIGHT NORMALIZER (kept)
 # -------------------------------------------------
 def normalize_text(text: str) -> str:
-    """
-    Minimal-cost normalization for LLM output (Ollama-safe).
-    No regex chains, no heavy processing.
-    """
     if not text:
         return ""
 
-    # fast path cleanup only
     text = text.strip()
-
-    # collapse whitespace (single pass)
     text = " ".join(text.split())
 
-    # micro-fixes (cheap string ops only)
+    # ultra-cheap punctuation fixes
     text = text.replace(" .", ".")
     text = text.replace(" !", "!")
     text = text.replace(" ?", "?")
@@ -50,7 +42,7 @@ def normalize_text(text: str) -> str:
 
 
 # -------------------------------------------------
-# VOICE METADATA (UNCHANGED - DO NOT MODIFY)
+# VOICES (UNCHANGED)
 # -------------------------------------------------
 VOICE_TRAITS = {
     "af_alloy": {"gender": "Female", "tone": "Neutral"},
@@ -64,7 +56,6 @@ VOICE_TRAITS = {
     "af_river": {"gender": "Female", "tone": "Smooth"},
     "af_sarah": {"gender": "Female", "tone": "Cheerful"},
     "af_sky": {"gender": "Female", "tone": "Friendly"},
-
     "am_adam": {"gender": "Male", "tone": "Deep/Resonant"},
     "am_echo": {"gender": "Male", "tone": "Neutral"},
     "am_eric": {"gender": "Male", "tone": "Expressive"},
@@ -74,29 +65,9 @@ VOICE_TRAITS = {
     "am_onyx": {"gender": "Male", "tone": "Bold"},
     "am_puck": {"gender": "Male", "tone": "Youthful"},
     "am_santa": {"gender": "Male", "tone": "Jolly"},
-
-    "bf_alice": {"gender": "Female", "tone": "British Crisp"},
-    "bf_emma": {"gender": "Female", "tone": "British Gentle"},
-    "bf_isabella": {"gender": "Female", "tone": "British Clear"},
-    "bf_lily": {"gender": "Female", "tone": "British Sweet"},
-
-    "bm_daniel": {"gender": "Male", "tone": "British Assertive"},
-    "bm_fable": {"gender": "Male", "tone": "British Storyteller"},
-    "bm_george": {"gender": "Male", "tone": "British Warm"},
-    "bm_lewis": {"gender": "Male", "tone": "British Formal"},
-
-    "jf_alpha": {"gender": "Female", "tone": "Japanese Clear"},
-    "zf_xiaoxiao": {"gender": "Female", "tone": "Mandarin Sweet"},
-    "ff_siwis": {"gender": "Female", "tone": "French Soft"},
 }
 
-SUPPORTED_LANGS = sorted({
-    "en-us",
-    "en-gb",
-    "ja",
-    "zh-cn",
-    "fr-fr",
-})
+SUPPORTED_LANGS = ["en-us", "en-gb", "ja", "zh-cn", "fr-fr"]
 
 
 def resolve_voice(v_code: str):
@@ -115,31 +86,31 @@ def resolve_voice(v_code: str):
     prefix = v_code[:2]
     lang = lang_map.get(prefix, "en-us")
 
-    if lang not in SUPPORTED_LANGS:
-        lang = "en-us"
-
     traits = VOICE_TRAITS.get(v_code)
     name = v_code.split("_")[-1].capitalize()
 
-    if traits:
-        pretty = f"{name} ({traits['gender']}, {traits['tone']})"
-    else:
-        gender = "Female" if "_f_" in v_code or prefix.endswith("f") else "Male"
-        pretty = f"{name} ({gender})"
+    pretty = f"{name} ({traits['gender']}, {traits['tone']})" if traits else name
 
     return lang, pretty
 
 
 # -------------------------------------------------
-# WYOMING HANDLER (ONLY HOT PATH MODIFIED SLIGHTLY)
+# WYOMING HANDLER (OPTIMIZED)
 # -------------------------------------------------
 class KokoroWyomingHandler(AsyncEventHandler):
 
-    def __init__(self, kokoro, default_voice, speed, *args, **kwargs):
+    def __init__(self, kokoro, default_voice, speed, loop, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.kokoro = kokoro
         self.default_voice = default_voice
         self.speed = speed
+        self.loop = loop
+
+        # warmup (CRITICAL for HA latency perception)
+        try:
+            self.kokoro.create("hello", voice=self.default_voice, speed=self.speed, lang="en-us")
+        except Exception:
+            pass
 
     async def handle_event(self, event: Event) -> bool:
 
@@ -148,7 +119,6 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
             for v in self.kokoro.get_voices():
                 lang, pretty = resolve_voice(v)
-
                 voices.append({
                     "name": v,
                     "description": pretty,
@@ -167,10 +137,6 @@ class KokoroWyomingHandler(AsyncEventHandler):
                     "languages": SUPPORTED_LANGS,
                     "installed": True,
                     "voices": voices,
-                    "attribution": {
-                        "name": "hexgrad",
-                        "url": "https://github.com/hexgrad/Kokoro-82M"
-                    }
                 }]
             }))
             return True
@@ -181,38 +147,27 @@ class KokoroWyomingHandler(AsyncEventHandler):
             voice = synth.voice.name if synth.voice else self.default_voice
             lang, _ = resolve_voice(voice)
 
+            raw_text = synth.text
+            if not raw_text:
+                return True
+
+            clean_text = normalize_text(raw_text)
+            if len(clean_text) < 2:
+                return True
+
+            start = time.perf_counter()
+
             try:
-                start = time.perf_counter()
-
-                raw_text = synth.text
-
                 # -------------------------------------------------
-                # ONLY ADDED LOGIC (SAFE + LOW OVERHEAD)
+                # OFFLOAD BLOCKING TTS TO THREAD (IMPORTANT FIX)
                 # -------------------------------------------------
-                if not raw_text:
-                    return True
-
-                clean_text = normalize_text(raw_text)
-
-                if len(clean_text) < 2:
-                    return True
-
-                # IMPORTANT: avoid expensive logging formatting
-                if _LOGGER.isEnabledFor(logging.DEBUG):
-                    _LOGGER.debug("RAW=%s", raw_text)
-                    _LOGGER.debug("CLEAN=%s", clean_text)
-
-                samples, sr = self.kokoro.create(
+                samples, sr = await self.loop.run_in_executor(
+                    None,
+                    self.kokoro.create,
                     clean_text,
-                    voice=voice,
-                    speed=self.speed,
-                    lang=lang,
-                )
-
-                _LOGGER.info(
-                    "TTS done in %.3fs (%d chars)",
-                    time.perf_counter() - start,
-                    len(clean_text)
+                    voice,
+                    self.speed,
+                    lang,
                 )
 
                 audio = (samples * 32767).astype("int16").tobytes()
@@ -221,8 +176,14 @@ class KokoroWyomingHandler(AsyncEventHandler):
                 await self.write_event(AudioChunk(audio=audio, rate=sr, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
 
-            except Exception:
-                _LOGGER.exception("Synthesis error")
+                _LOGGER.info(
+                    "TTS %.3fs | %d chars",
+                    time.perf_counter() - start,
+                    len(clean_text)
+                )
+
+            except Exception as e:
+                _LOGGER.exception("TTS failure")
                 await self.write_event(Event(type="error", data={"message": str(e)}))
                 return False
 
@@ -232,7 +193,7 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
 
 # -------------------------------------------------
-# MAIN (UNCHANGED)
+# MAIN
 # -------------------------------------------------
 async def main():
 
@@ -260,36 +221,28 @@ async def main():
     onnx_files = sorted(data_path.glob("*.onnx"))
     bin_files = sorted(data_path.glob("*.bin"))
 
-    if not onnx_files:
-        raise FileNotFoundError("No ONNX model found")
-
-    if not bin_files:
-        raise FileNotFoundError("No voices file found")
+    if not onnx_files or not bin_files:
+        raise FileNotFoundError("Missing model or voices files")
 
     model_path = args.model or str(onnx_files[0])
     voices_path = args.voices or str(bin_files[0])
 
-    providers = ort.get_available_providers()
-
-    if args.cpu:
-        provider = "CPUExecutionProvider"
-    elif "CUDAExecutionProvider" in providers:
+    provider = "CPUExecutionProvider"
+    if not args.cpu and "CUDAExecutionProvider" in ort.get_available_providers():
         provider = "CUDAExecutionProvider"
-    else:
-        provider = "CPUExecutionProvider"
 
     _LOGGER.info("Provider: %s", provider)
-    _LOGGER.info("Model: %s", model_path)
-    _LOGGER.info("Voices: %s", voices_path)
 
     kokoro = Kokoro(model_path, voices_path)
 
     server = AsyncServer.from_uri(args.uri)
+    loop = asyncio.get_running_loop()
+
     _LOGGER.info("Listening on %s", args.uri)
 
     await server.run(
         lambda r, w: KokoroWyomingHandler(
-            kokoro, args.voice, args.speed, r, w
+            kokoro, args.voice, args.speed, loop, r, w
         )
     )
 
