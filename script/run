@@ -1,27 +1,37 @@
 #!/usr/bin/env bash
 set -e
 
-# 1. Setup Paths
-# Get the directory where THIS script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-# Get the project root (one level up from script/)
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
-SCRIPT_PATH="$PROJECT_ROOT/wyoming_kokoro.py"
+SCRIPT="$PROJECT_ROOT/wyoming_kokoro.py"
 
-# 2. Safety Check
 if [ ! -f "$VENV_PYTHON" ]; then
-    echo "❌ Error: Virtual environment not found. Please run setup first."
+    echo "❌ run setup first"
     exit 1
 fi
 
-echo "🚀 Starting Kokoro Wyoming TTS..."
+echo "🚀 Starting Kokoro TTS"
 
-# 3. Execution
-# 'exec' replaces the bash process with the python process (better for memory/signals)
-exec "$VENV_PYTHON" "$SCRIPT_PATH" \
+# GPU stability hints
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
+
+if command -v nvidia-smi &> /dev/null; then
+    export CUDA_VISIBLE_DEVICES=0
+    export CUDA_MODULE_LOADING=LAZY
+fi
+
+# ==========================================================
+# DEFAULTS (USED ONLY IF CLIENT DOES NOT PROVIDE VOICE)
+# ==========================================================
+DEFAULT_VOICE="af_heart"
+DEFAULT_SPEED="1.0"
+
+exec "$VENV_PYTHON" "$SCRIPT" \
     --uri tcp://0.0.0.0:10200 \
-    --voice af_heart \
-    --speed 1.0 \
+    --voice "$DEFAULT_VOICE" \
+    --speed "$DEFAULT_SPEED" \
     "$@"
