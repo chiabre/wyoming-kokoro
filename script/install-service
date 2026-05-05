@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -e
 
-SERVICE_NAME="wyoming-kokoro"
+SERVICE="wyoming-kokoro"
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Detect the actual user even if run with sudo
-REAL_USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
-REAL_GROUP=$(id -gn "$REAL_USER")
+USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
+GROUP=$(id -gn "$USER")
 
-echo "🛠 Installing $SERVICE_NAME for user: $REAL_USER"
+echo "Installing $SERVICE for $USER"
 
-sudo bash -c "cat > /etc/systemd/system/$SERVICE_NAME.service" <<EOF
+sudo bash -c "cat > /etc/systemd/system/$SERVICE.service" <<EOF
 [Unit]
 Description=Wyoming Kokoro TTS
 Wants=network-online.target
@@ -19,31 +19,44 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=$REAL_USER
-Group=$REAL_GROUP
-WorkingDirectory=$PROJECT_ROOT
+User=$USER
+Group=$GROUP
+WorkingDirectory=$ROOT
 
-# Ensure GPU libraries are visible to the service
+# ---------------- GPU ----------------
 Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
-Environment="PYTHONUNBUFFERED=1"
+Environment="CUDA_VISIBLE_DEVICES=0"
+Environment="CUDA_MODULE_LOADING=LAZY"
 
-# We call the 'run' script which handles venv internally
-ExecStart=$PROJECT_ROOT/script/run
+# ---------------- Python ----------------
+Environment="PYTHONUNBUFFERED=1"
+Environment="OMP_NUM_THREADS=1"
+Environment="MKL_NUM_THREADS=1"
+
+# ---------------- HA LATENCY TUNING ----------------
+Nice=-5
+IOSchedulingClass=realtime
+IOSchedulingPriority=0
+
+# ---------------- RESOURCE LIMITS ----------------
+CPUQuota=200%
+MemoryMax=2G
+
+ExecStart=$ROOT/script/run
+
 Restart=always
-RestartSec=5
+RestartSec=3
+TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Set permissions and refresh systemd
-sudo chmod 644 "/etc/systemd/system/$SERVICE_NAME.service"
+sudo chmod 644 /etc/systemd/system/$SERVICE.service
 sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
-sudo systemctl restart "$SERVICE_NAME"
+sudo systemctl enable $SERVICE
+sudo systemctl restart $SERVICE
 
 echo "-------------------------------------------------------"
-echo "✅ $SERVICE_NAME installed and started!"
-echo "Check status: sudo systemctl status $SERVICE_NAME"
-echo "View logs:    journalctl -u $SERVICE_NAME -f"
+echo "✅ $SERVICE running"
 echo "-------------------------------------------------------"
