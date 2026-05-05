@@ -144,7 +144,11 @@ class KokoroWyomingHandler(AsyncEventHandler):
         if event.type == "synthesize":
 
             synth = Synthesize.from_event(event)
-            voice = synth.voice.name if synth.voice else self.default_voice
+            voice = self.default_voice
+
+            if synth.voice and getattr(synth.voice, "name", None):
+                voice = synth.voice.name
+                
             lang, _ = resolve_voice(voice)
 
             raw_text = synth.text
