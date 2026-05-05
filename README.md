@@ -38,7 +38,7 @@ chmod +x script/setup
 
 Kokoro supports multiple ONNX model formats depending on hardware.
 
-You can select models via the installer or manually using --model.
+You can select models via the installer or manually using `--model`.
 
 ### ⚙️ Supported Models
 
@@ -56,8 +56,8 @@ Model and voice files are handled automatically by the setup script.
 The installer will:
 - Detect available GPU/CPU hardware
 - Prompt for model selection (FP16 / FP32 / INT8)
-- Download the correct files into ./data
-- Ensure version compatibility (Kokoro v1.0 + voices v1.0
+- Download the correct files into `./data`
+- Ensure version compatibility (Kokoro v1.0 + voices v1.0)
 
 #### ⚙️ Run the automated setup
 
@@ -111,12 +111,23 @@ python3 -m wyoming_kokoro --uri tcp://0.0.0.0:10200
 | `--data-dir` | Optional | `./data`              | Model directory         |
 | `--model`    | Optional | auto                  | Path to ONNX model      |
 | `--voices`   | Optional | auto                  | Voices bin file         |
-| `--voice`    | Optional | `af_heart`            | Default voice           |
+| `--voice`    | Optional | `af_heart`            | Default fallback voice  |
 | `--speed`    | Optional | `1.0`                 | Speech speed multiplier |
 | `--cpu`      | Flag     | `False`               | Force CPU inference     |
 | `--debug`    | Flag     | `False`               | Enable verbose logs     |
 
 ---
+
+## 🧠 Voice Behavior (IMPORTANT)
+
+This service now supports client-controlled voice selection (Wyoming compliant):
+- If the client (Home Assistant) provides a voice → it is used
+- If no voice is provided → fallback voice is used (af_heart by default)
+
+This enables:
+- per-room voice assignment
+- dynamic persona routing
+- automation-based voice switching
 
 ## 🧩 Systemd Deployment
 Install as a background service:
@@ -148,5 +159,6 @@ systemctl restart wyoming-kokoro
 - Use `FP16` for best GPU performance 
 - Use `FP32` for maximum compatibility
 - Use `INT8` for embedded or low-power systems
-- Model selection is fully manual or installer-driven
-- Voices must always match version v1.0
+- Model selection is installer-driven or manual via CLI
+- Voice is now client-overridable (Wyoming compliant)
+- Warmup is performed at startup to reduce first-request latency
