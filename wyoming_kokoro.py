@@ -1,256 +1,271 @@
-#!/usr/bin/env python3
 import argparse
 import asyncio
 import logging
 import os
-import time
+import time  # Added for timing debug info
 from pathlib import Path
-
 import numpy as np
 import onnxruntime as ort
 from kokoro_onnx import Kokoro
-
 from wyoming.server import AsyncServer, AsyncEventHandler
 from wyoming.event import Event
 from wyoming.tts import Synthesize
 from wyoming.audio import AudioStart, AudioChunk, AudioStop
 
-# -------------------------------------------------
-# LOGGING
-# -------------------------------------------------
+# Initial logging setup (will be overridden in main)
 logging.basicConfig(level=logging.INFO)
+
 _LOGGER = logging.getLogger(__name__)
 
-logging.getLogger("phonemizer").setLevel(logging.ERROR)
-
-# -------------------------------------------------
-# LIGHT NORMALIZER (kept)
-# -------------------------------------------------
-def normalize_text(text: str) -> str:
-    if not text:
-        return ""
-
-    text = text.strip()
-    text = " ".join(text.split())
-
-    text = text.replace(" .", ".")
-    text = text.replace(" !", "!")
-    text = text.replace(" ?", "?")
-
-    return text
-
-
-# -------------------------------------------------
-# VOICES (UNCHANGED)
-# -------------------------------------------------
 VOICE_TRAITS = {
-    "af_alloy": {"gender": "Female", "tone": "Neutral"},
-    "af_aoede": {"gender": "Female", "tone": "Lyric"},
-    "af_bella": {"gender": "Female", "tone": "Soft/Warm"},
-    "af_heart": {"gender": "Female", "tone": "Balanced"},
-    "af_jessica": {"gender": "Female", "tone": "Bright"},
-    "af_kore": {"gender": "Female", "tone": "Calm"},
-    "af_nicole": {"gender": "Female", "tone": "Professional"},
-    "af_nova": {"gender": "Female", "tone": "Energetic"},
-    "af_river": {"gender": "Female", "tone": "Smooth"},
-    "af_sarah": {"gender": "Female", "tone": "Cheerful"},
-    "af_sky": {"gender": "Female", "tone": "Friendly"},
-    "am_adam": {"gender": "Male", "tone": "Deep/Resonant"},
-    "am_echo": {"gender": "Male", "tone": "Neutral"},
-    "am_eric": {"gender": "Male", "tone": "Expressive"},
-    "am_fenrir": {"gender": "Male", "tone": "Deep/Narrator"},
-    "am_liam": {"gender": "Male", "tone": "Clean"},
-    "am_michael": {"gender": "Male", "tone": "Strong"},
-    "am_onyx": {"gender": "Male", "tone": "Bold"},
-    "am_puck": {"gender": "Male", "tone": "Youthful"},
-    "am_santa": {"gender": "Male", "tone": "Jolly"},
+    # --------------------
+    # English (US)
+    # --------------------
+    "af_alloy":   {"gender": "female", "lang": "en-us", "overall_grade": "C"},
+    "af_aoede":   {"gender": "female", "lang": "en-us", "overall_grade": "C+"},
+    "af_bella":   {"gender": "female", "lang": "en-us", "overall_grade": "A-"},
+    "af_heart":   {"gender": "female", "lang": "en-us", "overall_grade": "A"},
+    "af_jessica": {"gender": "female", "lang": "en-us", "overall_grade": "D"},
+    "af_kore":    {"gender": "female", "lang": "en-us", "overall_grade": "C+"},
+    "af_nicole":  {"gender": "female", "lang": "en-us", "overall_grade": "B-"},
+    "af_nova":    {"gender": "female", "lang": "en-us", "overall_grade": "C"},
+    "af_river":   {"gender": "female", "lang": "en-us", "overall_grade": "D"},
+    "af_sarah":   {"gender": "female", "lang": "en-us", "overall_grade": "C+"},
+    "af_sky":     {"gender": "female", "lang": "en-us", "overall_grade": "C-"},
+
+
+    "am_adam":    {"gender": "male", "lang": "en-us", "overall_grade": "F+"},
+    "am_echo":    {"gender": "male", "lang": "en-us", "overall_grade": "D"},
+    "am_eric":    {"gender": "male", "lang": "en-us", "overall_grade": "D"},
+    "am_fenrir":  {"gender": "male", "lang": "en-us", "overall_grade": "C+"},
+    "am_liam":    {"gender": "male", "lang": "en-us", "overall_grade": "D"},
+    "am_michael": {"gender": "male", "lang": "en-us", "overall_grade": "C+"},
+    "am_onyx":    {"gender": "male", "lang": "en-us", "overall_grade": "D"},
+    "am_puck":    {"gender": "male", "lang": "en-us", "overall_grade": "C+"},
+    "am_santa":   {"gender": "male", "lang": "en-us", "overall_grade": "D-"},
+
+
+    # --------------------
+    # English (UK)
+    # --------------------
+    "bf_alice":    {"gender": "female", "lang": "en-gb", "overall_grade": "D"},
+    "bf_emma":     {"gender": "female", "lang": "en-gb", "overall_grade": "B-"},
+    "bf_isabella": {"gender": "female", "lang": "en-gb", "overall_grade": "C"},
+    "bf_lily":     {"gender": "female", "lang": "en-gb", "overall_grade": "D"},
+
+    "bm_daniel":   {"gender": "male", "lang": "en-gb", "overall_grade": "D"},
+    "bm_fable":    {"gender": "male", "lang": "en-gb", "overall_grade": "C"},
+    "bm_george":   {"gender": "male", "lang": "en-gb", "overall_grade": "C"},
+    "bm_lewis":    {"gender": "male", "lang": "en-gb", "overall_grade": "D+"},
+
+
+    # --------------------
+    # Japanese
+    # --------------------
+    "jf_alpha":      {"gender": "female", "lang": "ja", "overall_grade": "C+"},
+    "jf_gongitsune": {"gender": "female", "lang": "ja", "overall_grade": "C"},
+    "jf_nezumi":     {"gender": "female", "lang": "ja", "overall_grade": "C-"},
+    "jf_tebukuro":   {"gender": "female", "lang": "ja", "overall_grade": "C"},
+    "jm_kumo":       {"gender": "male", "lang": "ja", "overall_grade": "C-"},
+
+
+    # --------------------
+    # Mandarin
+    # --------------------
+    "zf_xiaobei":  {"gender": "female", "lang": "zh-cn", "overall_grade": "D"},
+    "zf_xiaoni":   {"gender": "female", "lang": "zh-cn", "overall_grade": "D"},
+    "zf_xiaoxiao": {"gender": "female", "lang": "zh-cn", "overall_grade": "D"},
+    "zf_xiaoyi":   {"gender": "female", "lang": "zh-cn", "overall_grade": "D"},
+
+    "zm_yunjian":  {"gender": "male", "lang": "zh-cn", "overall_grade": "D"},
+    "zm_yunxi":    {"gender": "male", "lang": "zh-cn", "overall_grade": "D"},
+    "zm_yunxia":   {"gender": "male", "lang": "zh-cn", "overall_grade": "D"},
+    "zm_yunyang":  {"gender": "male", "lang": "zh-cn", "overall_grade": "D"},
+
+
+    # --------------------
+    # French
+    # --------------------
+    "ff_siwis": {"gender": "female", "lang": "fr-fr", "overall_grade": "B-"},
+
+
+    # --------------------
+    # Spanish
+    # --------------------
+    "ef_dora":  {"gender": "female", "lang": "es-es"},
+    "em_alex":  {"gender": "male", "lang": "es-es"},
+    "em_santa": {"gender": "male", "lang": "es-es"},
+
+
+    # --------------------
+    # Italian
+    # --------------------
+    "if_sara":   {"gender": "female", "lang": "it-it"},
+    "im_nicola": {"gender": "male", "lang": "it-it"},
+
+
+    # --------------------
+    # Hindi
+    # --------------------
+    "hf_alpha": {"gender": "female", "lang": "hi-in"},
+    "hf_beta":  {"gender": "female", "lang": "hi-in"},
+    "hm_omega": {"gender": "male", "lang": "hi-in"},
+    "hm_psi":   {"gender": "male", "lang": "hi-in"},
+
+
+    # --------------------
+    # Portuguese (BR)
+    # --------------------
+    "pf_dora":   {"gender": "female", "lang": "pt-br"},
+    "pm_alex":   {"gender": "male", "lang": "pt-br"},
+    "pm_santa":  {"gender": "male", "lang": "pt-br"},
 }
 
-SUPPORTED_LANGS = ["en-us", "en-gb", "ja", "zh-cn", "fr-fr"]
+SUPPORTED_LANGS = sorted({
+    "en-us",
+    "en-gb",
+    "ja",
+    "zh-cn",
+    "fr-fr",
+    "es-es",
+    "it-it",
+    "hi-in",
+    "pt-br",
+})
 
-
-def resolve_voice(v_code: str):
-    lang_map = {
-        "af": "en-us",
-        "am": "en-us",
-        "bf": "en-gb",
-        "bm": "en-gb",
-        "jf": "ja",
-        "jm": "ja",
-        "zf": "zh-cn",
-        "zm": "zh-cn",
-        "ff": "fr-fr",
-    }
-
-    prefix = v_code[:2]
-    lang = lang_map.get(prefix, "en-us")
-
+def get_voice_metadata(v_code: str):
     traits = VOICE_TRAITS.get(v_code)
     name = v_code.split("_")[-1].capitalize()
 
-    pretty = f"{name} ({traits['gender']}, {traits['tone']})" if traits else name
+    prefix = v_code[:2]
 
-    return lang, pretty
+    fallback_map = {
+        "af": "en-us",
+        "am": "en-us",
 
+        "bf": "en-gb",
+        "bm": "en-gb",
 
-# -------------------------------------------------
-# WYOMING HANDLER (INSTRUMENTED)
-# -------------------------------------------------
+        "jf": "ja",
+        "jm": "ja",
+
+        "zf": "zh-cn",
+        "zm": "zh-cn",
+
+        "ff": "fr-fr",
+
+        "ef": "es-es",
+        "em": "es-es",
+
+        "if": "it-it",
+        "im": "it-it",
+
+        "hf": "hi-in",
+        "hm": "hi-in",
+
+        "pf": "pt-br",
+        "pm": "pt-br",
+    }
+
+    lang_code = fallback_map.get(prefix, "en-us")
+
+    if lang_code not in SUPPORTED_LANGS:
+        lang_code = "en-us"
+
+    if traits:
+        grade = traits.get("overall_grade", "N/A")
+        pretty_name = f"{name} ({traits['gender']}, {grade})"
+    else:
+        pretty_name = f"{name}"
+
+    return pretty_name, lang_code
+
 class KokoroWyomingHandler(AsyncEventHandler):
-
-    def __init__(self, kokoro, default_voice, speed, loop, *args, **kwargs):
+    def __init__(self, kokoro, default_voice, speed, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.kokoro = kokoro
         self.default_voice = default_voice
         self.speed = speed
-        self.loop = loop
-
-        try:
-            self.kokoro.create("hello", voice=self.default_voice, speed=self.speed, lang="en-us")
-        except Exception:
-            pass
 
     async def handle_event(self, event: Event) -> bool:
-
+        _LOGGER.debug("Received event: %s", event.type)
+        
         if event.type == "describe":
-            voices = []
+            requested_lang = None
+            if hasattr(event, "data") and event.data:
+                requested_lang = event.data.get("language")
+
+            voice_list = []
 
             for v in self.kokoro.get_voices():
-                lang, pretty = resolve_voice(v)
-                voices.append({
-                    "name": v,
-                    "description": pretty,
-                    "languages": [lang],
-                    "installed": True,
-                    "attribution": {
-                        "name": "hexgrad",
-                        "url": "https://github.com/hexgrad/Kokoro-82M"
-                    }
-                })
+                pretty_name, lang_code = get_voice_metadata(v)
 
-            await self.write_event(Event(type="info", data={
-                "tts": [{
-                    "name": "kokoro",
-                    "description": "Kokoro TTS",
-                    "languages": SUPPORTED_LANGS,
+                if lang_code is None:
+                    continue
+
+                if requested_lang and lang_code != requested_lang:
+                    continue
+
+                voice_list.append({
+                    "name": v, 
+                    "description": pretty_name,
+                    "languages": [lang_code], 
                     "installed": True,
-                    "voices": voices,
-                }]
-            }))
+                    "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"}
+                })
+            
+            await self.write_event(Event(type="info", data={"tts": [{
+                "name": "kokoro", 
+                "description": "Kokoro TTS",
+                "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"},
+                "installed": True, 
+                "voices": voice_list
+            }]}))
             return True
 
         if event.type == "synthesize":
-
-            total_t0 = time.perf_counter()
-
             synth = Synthesize.from_event(event)
+            voice = synth.voice.name if synth.voice else self.default_voice
 
-            voice = self.default_voice
-            if synth.voice and getattr(synth.voice, "name", None):
-                voice = synth.voice.name
-
-            lang, _ = resolve_voice(voice)
-
-            # -------------------------
-            # PREPROCESS TIMING
-            # -------------------------
-            t_pre0 = time.perf_counter()
-
-            raw_text = synth.text
-            if not raw_text:
-                return True
-
-            clean_text = normalize_text(raw_text)
-            if len(clean_text) < 2:
-                return True
-
-            t_pre1 = time.perf_counter()
-
-            # -------------------------
-            # EXECUTION QUEUE DELAY
-            # -------------------------
-            t_queue0 = time.perf_counter()
-
+            _, lang_code = get_voice_metadata(voice)
+            
+            _LOGGER.debug("Synthesizing: '%s' using voice %s (%s)", synth.text, voice, lang_code)
+            
             try:
-                # -------------------------
-                # INFERENCE
-                # -------------------------
-                def _run():
-                    return self.kokoro.create(
-                        clean_text,
-                        voice,
-                        self.speed,
-                        lang,
-                    )
+                start_time = time.perf_counter()
 
-                samples, sr = await self.loop.run_in_executor(None, _run)
+                samples, sample_rate = self.kokoro.create(
+                    synth.text, 
+                    voice=voice, 
+                    speed=self.speed, 
+                    lang=lang_code
+                )
 
-                t_inf1 = time.perf_counter()
+       
+                _LOGGER.debug("Inference took %.2f seconds", time.perf_counter() - start_time)
 
-                # -------------------------
-                # AUDIO ENCODE
-                # -------------------------
-                audio = (samples * 32767).astype("int16").tobytes()
-
-                t_enc1 = time.perf_counter()
-
-                await self.write_event(AudioStart(rate=sr, width=2, channels=1).event())
-                await self.write_event(AudioChunk(audio=audio, rate=sr, width=2, channels=1).event())
+                audio_data = (samples * 32767).astype("int16").tobytes()
+                
+                await self.write_event(AudioStart(rate=sample_rate, width=2, channels=1).event())
+                await self.write_event(AudioChunk(audio=audio_data, rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
 
-                t_emit1 = time.perf_counter()
-
-                # -------------------------
-                # FINAL LOG (FULL BREAKDOWN)
-                # -------------------------
-                _LOGGER.info(
-                    "TTS TOTAL=%.3fs | text=%d",
-                    t_emit1 - total_t0,
-                    len(clean_text),
-                )
-
-                _LOGGER.debug(
-                    "  ├─ preprocess=%.3fs",
-                    t_pre1 - t_pre0,
-                )
-                _LOGGER.debug(
-                    "  ├─ queue=%.3fs",
-                    t_queue0 - t_pre1,
-                )
-                _LOGGER.debug(
-                    "  ├─ inference=%.3fs",
-                    t_inf1 - t_queue0,
-                )
-                _LOGGER.debug(
-                    "  ├─ encode=%.3fs",
-                    t_enc1 - t_inf1,
-                )
-                _LOGGER.debug(
-                    "  └─ emit=%.3fs",
-                    t_emit1 - t_enc1,
-                )
+                _LOGGER.debug("Audio events sent successfully")
 
             except Exception as e:
-                _LOGGER.exception("TTS failure")
-                await self.write_event(Event(type="error", data={"message": str(e)}))
-                return False
+                _LOGGER.error(f"Synthesis error: {e}")
 
-            return True
-
+            return False
+            
         return True
 
-
-# -------------------------------------------------
-# MAIN (UNCHANGED)
-# -------------------------------------------------
 async def main():
-
-    base = Path(__file__).parent
-    data_dir = base / "data"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_data = os.path.join(script_dir, "data")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--uri", default="tcp://0.0.0.0:10200")
-    parser.add_argument("--data-dir", default=str(data_dir))
+    parser.add_argument("--data-dir", default=default_data)
     parser.add_argument("--model")
     parser.add_argument("--voices")
     parser.add_argument("--voice", default="af_heart")
@@ -260,40 +275,56 @@ async def main():
 
     args = parser.parse_args()
 
+    # Apply debug logging level if requested
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+        _LOGGER.debug("Debug logging enabled")
 
+    # --- Dynamic Discovery Logic ---
     data_path = Path(args.data_dir)
-    data_path.mkdir(parents=True, exist_ok=True)
 
-    onnx_files = sorted(data_path.glob("*.onnx"))
-    bin_files = sorted(data_path.glob("*.bin"))
+    # 1. Model resolution
+    if args.model:
+        model_path = args.model
+    else:
+        onnx_files = sorted(list(data_path.glob("*.onnx")))
+        model_path = str(onnx_files[0]) if onnx_files else os.path.join(args.data_dir, "kokoro-v1.0.onnx")
 
-    if not onnx_files or not bin_files:
-        raise FileNotFoundError("Missing model or voices files")
+    # 2. Voice resolution
+    if args.voices:
+        voices_path = args.voices
+    else:
+        bin_files = sorted(list(data_path.glob("*.bin")))
+        voices_path = str(bin_files[0]) if bin_files else os.path.join(args.data_dir, "voices-v1.0.bin")
 
-    model_path = args.model or str(onnx_files[0])
-    voices_path = args.voices or str(bin_files[0])
-
-    provider = "CPUExecutionProvider"
-    if not args.cpu and "CUDAExecutionProvider" in ort.get_available_providers():
+    # Provider Handling
+    available = ort.get_available_providers()
+    if args.cpu:
+        provider = "CPUExecutionProvider"
+    elif "CUDAExecutionProvider" in available:
         provider = "CUDAExecutionProvider"
+    else:
+        provider = "CPUExecutionProvider"
+    
+    os.environ["ONNX_PROVIDER"] = provider
+    
+    _LOGGER.info(f"Hardware: {provider}")
+    _LOGGER.info(f"Model: {model_path}")
+    _LOGGER.info(f"Voices: {voices_path}")
 
-    _LOGGER.info("Provider: %s", provider)
+    if not os.path.exists(model_path):
+        _LOGGER.error(f"Model file not found: {model_path}")
+        return
+    if not os.path.exists(voices_path):
+        _LOGGER.error(f"Voices file not found: {voices_path}")
+        return
 
     kokoro = Kokoro(model_path, voices_path)
-
+    
     server = AsyncServer.from_uri(args.uri)
-    loop = asyncio.get_running_loop()
-
-    _LOGGER.info("Listening on %s", args.uri)
-
-    await server.run(
-        lambda r, w: KokoroWyomingHandler(
-            kokoro, args.voice, args.speed, loop, r, w
-        )
-    )
-
+    _LOGGER.info(f"Ready. Listening on {args.uri}")
+    
+    await server.run(lambda r, w: KokoroWyomingHandler(kokoro, args.voice, args.speed, r, w))
 
 if __name__ == "__main__":
     try:
