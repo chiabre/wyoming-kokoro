@@ -13,7 +13,6 @@ download() {
     echo "⬇️ $FILE"
 
     rm -f "data/$FILE"
-
     wget -q --show-progress -O "data/$FILE" "$URL"
 
     if [ ! -s "data/$FILE" ]; then
@@ -22,7 +21,13 @@ download() {
     fi
 }
 
-# voices
+# ----------------------------
+# ALWAYS CLEAN OLD MODELS
+# ----------------------------
+echo "🧹 Removing old models..."
+rm -f data/*.onnx
+
+# voices (single source of truth)
 if [ ! -f "data/voices-v1.0.bin" ]; then
     download "voices-v1.0.bin" "$BASE_URL/voices-v1.0.bin"
 fi
@@ -47,13 +52,11 @@ case "$CHOICE" in
 esac
 
 if [[ "$MODEL" == *fp16* && "$HAS_GPU" = false ]]; then
-    echo "⚠️ FP16 selected but no GPU"
+    echo "⚠️ FP16 selected but no GPU → fallback to CPU model"
     MODEL="kokoro-v1.0.onnx"
 fi
 
-if [ ! -f "data/$MODEL" ]; then
-    download "$MODEL" "$BASE_URL/$MODEL"
-fi
+download "$MODEL" "$BASE_URL/$MODEL"
 
-echo "✅ Model: $MODEL"
+echo "✅ Active model: $MODEL"
 echo "✅ Voices ready"
