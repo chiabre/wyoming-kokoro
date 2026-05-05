@@ -133,42 +133,61 @@ SUPPORTED_LANGS = sorted({
     "pt-br",
 })
 
-def get_voice_metadata(v_code: str):
-    traits = VOICE_TRAITS.get(v_code)
-    name = v_code.split("_")[-1].capitalize()
+FALLBACK_MAP = {
+    "af": "en-us",
+    "am": "en-us",
 
+    "bf": "en-gb",
+    "bm": "en-gb",
+
+    "jf": "ja",
+    "jm": "ja",
+
+    "zf": "zh-cn",
+    "zm": "zh-cn",
+
+    "ff": "fr-fr",
+
+    "ef": "es-es",
+    "em": "es-es",
+
+    "if": "it-it",
+    "im": "it-it",
+
+    "hf": "hi-in",
+    "hm": "hi-in",
+
+    "pf": "pt-br",
+    "pm": "pt-br",
+}
+
+
+# ----------------------------
+# FAST CACHE LAYERS
+# ----------------------------
+VOICE_LANG_CACHE = {
+    v: m["lang"]
+    for v, m in VOICE_TRAITS.items()
+    if "lang" in m
+}
+
+VOICE_META_CACHE = {
+    v: m
+    for v, m in VOICE_TRAITS.items()
+}
+
+def fast_chunk(text: str):
+    """Light segmentation only (low overhead, keeps latency stable)."""
+    return [t.strip() for t in text.replace("\n", ". ").split(".") if t.strip()]
+
+
+def get_voice_metadata(v_code: str):
+    traits = VOICE_META_CACHE.get(v_code)
+
+    name = v_code.split("_")[-1].capitalize()
     prefix = v_code[:2]
 
-    fallback_map = {
-        "af": "en-us",
-        "am": "en-us",
-
-        "bf": "en-gb",
-        "bm": "en-gb",
-
-        "jf": "ja",
-        "jm": "ja",
-
-        "zf": "zh-cn",
-        "zm": "zh-cn",
-
-        "ff": "fr-fr",
-
-        "ef": "es-es",
-        "em": "es-es",
-
-        "if": "it-it",
-        "im": "it-it",
-
-        "hf": "hi-in",
-        "hm": "hi-in",
-
-        "pf": "pt-br",
-        "pm": "pt-br",
-    }
-
-    lang_code = fallback_map.get(prefix, "en-us")
-
+    lang_code = FALLBACK_MAP.get(prefix, "en-us")
     if lang_code not in SUPPORTED_LANGS:
         lang_code = "en-us"
 
@@ -176,16 +195,19 @@ def get_voice_metadata(v_code: str):
         grade = traits.get("overall_grade", "N/A")
         pretty_name = f"{name} ({traits['gender']}, {grade})"
     else:
-        pretty_name = f"{name}"
+        pretty_name = name
 
     return pretty_name, lang_code
 
 class KokoroWyomingHandler(AsyncEventHandler):
-    def __init__(self, kokoro, default_voice, speed, *args, **kwargs):
+    def __init__(self, kokoro, default_voice, speed, voices, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.kokoro = kokoro
         self.default_voice = default_voice
         self.speed = speed
+
+        # NEW: cache voices once (important latency fix)
+        self.voices = voices
 
     async def handle_event(self, event: Event) -> bool:
         _LOGGER.debug("Received event: %s", event.type)
@@ -197,66 +219,82 @@ class KokoroWyomingHandler(AsyncEventHandler):
 
             voice_list = []
 
-            for v in self.kokoro.get_voices():
+            for v in self.voices:
                 pretty_name, lang_code = get_voice_metadata(v)
-
-                if lang_code is None:
-                    continue
 
                 if requested_lang and lang_code != requested_lang:
                     continue
 
                 voice_list.append({
-                    "name": v, 
+                    "name": v,
                     "description": pretty_name,
-                    "languages": [lang_code], 
+                    "languages": [lang_code],
                     "installed": True,
-                    "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"}
+                    "attribution": {
+                        "name": "hexgrad",
+                        "url": "https://github.com/hexgrad/Kokoro-82M"
+                    }
                 })
-            
-            await self.write_event(Event(type="info", data={"tts": [{
-                "name": "kokoro", 
-                "description": "Kokoro TTS",
-                "attribution": {"name": "hexgrad", "url": "https://github.com/hexgrad/Kokoro-82M"},
-                "installed": True, 
-                "voices": voice_list
-            }]}))
+
+            await self.write_event(Event(type="info", data={
+                "tts": [{
+                    "name": "kokoro",
+                    "description": "Kokoro TTS",
+                    "installed": True,
+                    "attribution": {
+                        "name": "hexgrad",
+                        "url": "https://github.com/hexgrad/Kokoro-82M"
+                    },
+                    "voices": voice_list
+                }]
+            }))
+
             return True
 
         if event.type == "synthesize":
             synth = Synthesize.from_event(event)
+
             voice = synth.voice.name if synth.voice else self.default_voice
-
             _, lang_code = get_voice_metadata(voice)
-            
-            _LOGGER.debug("Synthesizing: '%s' using voice %s (%s)", synth.text, voice, lang_code)
-            
+
+            _LOGGER.debug(
+                "Synthesizing: '%s' using voice %s (%s)",
+                synth.text, voice, lang_code
+            )
+
             try:
-                start_time = time.perf_counter()
+                start_time = time.perf_counter()    
+                await self.write_event(AudioStart(rate=24000, width=2, channels=1).event())
 
-                samples, sample_rate = self.kokoro.create(
-                    synth.text, 
-                    voice=voice, 
-                    speed=self.speed, 
-                    lang=lang_code
-                )
+                chunks = fast_chunk(synth.text)
 
-       
+                for chunk in chunks:
+                    samples, sample_rate = await asyncio.to_thread(
+                        self.kokoro.create,
+                        chunk,
+                        voice=voice,
+                        speed=self.speed,
+                        lang=lang_code
+                    )
+
+                    audio_data = (samples * 32767).astype("int16").tobytes()
+
+                    await self.write_event(AudioChunk(
+                        audio=audio_data,
+                        rate=sample_rate,
+                        width=2,
+                        channels=1
+                    ).event())
+
                 _LOGGER.debug("Inference took %.2f seconds", time.perf_counter() - start_time)
 
-                audio_data = (samples * 32767).astype("int16").tobytes()
-                
-                await self.write_event(AudioStart(rate=sample_rate, width=2, channels=1).event())
-                await self.write_event(AudioChunk(audio=audio_data, rate=sample_rate, width=2, channels=1).event())
                 await self.write_event(AudioStop().event())
 
-                _LOGGER.debug("Audio events sent successfully")
-
             except Exception as e:
-                _LOGGER.error(f"Synthesis error: {e}")
+                _LOGGER.error("Synthesis error: %s", e)
 
             return False
-            
+
         return True
 
 async def main():
@@ -275,39 +313,31 @@ async def main():
 
     args = parser.parse_args()
 
-    # Apply debug logging level if requested
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         _LOGGER.debug("Debug logging enabled")
 
-    # --- Dynamic Discovery Logic ---
     data_path = Path(args.data_dir)
 
-    # 1. Model resolution
-    if args.model:
-        model_path = args.model
-    else:
-        onnx_files = sorted(list(data_path.glob("*.onnx")))
-        model_path = str(onnx_files[0]) if onnx_files else os.path.join(args.data_dir, "kokoro-v1.0.onnx")
+    model_path = args.model or str(
+        next(iter(data_path.glob("*.onnx")), Path(args.data_dir) / "kokoro-v1.0.onnx")
+    )
 
-    # 2. Voice resolution
-    if args.voices:
-        voices_path = args.voices
-    else:
-        bin_files = sorted(list(data_path.glob("*.bin")))
-        voices_path = str(bin_files[0]) if bin_files else os.path.join(args.data_dir, "voices-v1.0.bin")
+    voices_path = args.voices or str(
+        next(iter(data_path.glob("*.bin")), Path(args.data_dir) / "voices-v1.0.bin")
+    )
 
-    # Provider Handling
     available = ort.get_available_providers()
+
     if args.cpu:
         provider = "CPUExecutionProvider"
     elif "CUDAExecutionProvider" in available:
         provider = "CUDAExecutionProvider"
     else:
         provider = "CPUExecutionProvider"
-    
+
     os.environ["ONNX_PROVIDER"] = provider
-    
+
     _LOGGER.info(f"Hardware: {provider}")
     _LOGGER.info(f"Model: {model_path}")
     _LOGGER.info(f"Voices: {voices_path}")
@@ -315,16 +345,29 @@ async def main():
     if not os.path.exists(model_path):
         _LOGGER.error(f"Model file not found: {model_path}")
         return
+
     if not os.path.exists(voices_path):
         _LOGGER.error(f"Voices file not found: {voices_path}")
         return
 
     kokoro = Kokoro(model_path, voices_path)
-    
+
+    voices = list(kokoro.get_voices())
+
     server = AsyncServer.from_uri(args.uri)
     _LOGGER.info(f"Ready. Listening on {args.uri}")
-    
-    await server.run(lambda r, w: KokoroWyomingHandler(kokoro, args.voice, args.speed, r, w))
+
+    await server.run(
+        lambda r, w: KokoroWyomingHandler(
+            kokoro,
+            args.voice,
+            args.speed,
+            voices,
+            r,
+            w
+        )
+    )
+
 
 if __name__ == "__main__":
     try:
