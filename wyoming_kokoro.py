@@ -2,7 +2,8 @@ import argparse
 import asyncio
 import logging
 import os
-import time  # Added for timing debug info
+import time
+import re
 from pathlib import Path
 import numpy as np
 import onnxruntime as ort
@@ -161,74 +162,70 @@ FALLBACK_MAP = {
     "pm": "pt-br",
 }
 
+VOICE_META_CACHE = VOICE_TRAITS
 
-# ----------------------------
-# FAST CACHE LAYERS
-# ----------------------------
-VOICE_LANG_CACHE = {
-    v: m["lang"]
-    for v, m in VOICE_TRAITS.items()
-    if "lang" in m
-}
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
-VOICE_META_CACHE = {
-    v: m
-    for v, m in VOICE_TRAITS.items()
-}
+def smart_chunk(text: str):
+    """
+    Kokoro-friendly segmentation:
+    - preserves natural prosody
+    - avoids over-splitting like naive split('.')
+    """
+    text = text.replace("\n", " ").strip()
+    if not text:
+        return []
 
-def fast_chunk(text: str):
-    """Light segmentation only (low overhead, keeps latency stable)."""
-    return [t.strip() for t in text.replace("\n", ". ").split(".") if t.strip()]
+    chunks = _SENTENCE_RE.split(text)
+    return [c.strip() for c in chunks if c.strip()]
 
 
 def get_voice_metadata(v_code: str):
     traits = VOICE_META_CACHE.get(v_code)
 
-    name = v_code.split("_")[-1].capitalize()
     prefix = v_code[:2]
-
-    lang_code = FALLBACK_MAP.get(prefix, "en-us")
-    if lang_code not in SUPPORTED_LANGS:
-        lang_code = "en-us"
+    lang = FALLBACK_MAP.get(prefix, "en-us")
+    if lang not in SUPPORTED_LANGS:
+        lang = "en-us"
 
     if traits:
         grade = traits.get("overall_grade", "N/A")
-        pretty_name = f"{name} ({traits['gender']}, {grade})"
+        label = f"{v_code.split('_')[-1].capitalize()} ({traits['gender']}, {grade})"
     else:
-        pretty_name = name
+        label = v_code.split('_')[-1].capitalize()
 
-    return pretty_name, lang_code
+    return label, lang
 
 class KokoroWyomingHandler(AsyncEventHandler):
     def __init__(self, kokoro, default_voice, speed, voices, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
         self.kokoro = kokoro
         self.default_voice = default_voice
         self.speed = speed
-
-        # NEW: cache voices once (important latency fix)
         self.voices = voices
 
     async def handle_event(self, event: Event) -> bool:
         _LOGGER.debug("Received event: %s", event.type)
         
         if event.type == "describe":
+
             requested_lang = None
-            if hasattr(event, "data") and event.data:
+            if getattr(event, "data", None):
                 requested_lang = event.data.get("language")
 
             voice_list = []
 
             for v in self.voices:
-                pretty_name, lang_code = get_voice_metadata(v)
+                label, lang = get_voice_metadata(v)
 
-                if requested_lang and lang_code != requested_lang:
+                if requested_lang and lang != requested_lang:
                     continue
 
                 voice_list.append({
                     "name": v,
-                    "description": pretty_name,
-                    "languages": [lang_code],
+                    "description": label,
+                    "languages": [lang],
                     "installed": True,
                     "attribution": {
                         "name": "hexgrad",
@@ -252,41 +249,43 @@ class KokoroWyomingHandler(AsyncEventHandler):
             return True
 
         if event.type == "synthesize":
+
             synth = Synthesize.from_event(event)
-
             voice = synth.voice.name if synth.voice else self.default_voice
-            _, lang_code = get_voice_metadata(voice)
 
-            _LOGGER.debug(
-                "Synthesizing: '%s' using voice %s (%s)",
-                synth.text, voice, lang_code
-            )
+            _, lang = get_voice_metadata(voice)
+
+            text = synth.text.strip()
+            if not text:
+                return False
 
             try:
-                start_time = time.perf_counter()    
                 await self.write_event(AudioStart(rate=24000, width=2, channels=1).event())
 
-                chunks = fast_chunk(synth.text)
+                # PRIORITY 1 applied here
+                chunks = smart_chunk(text)
+
+                start = time.perf_counter()
 
                 for chunk in chunks:
-                    samples, sample_rate = await asyncio.to_thread(
+                    samples, sr = await asyncio.to_thread(
                         self.kokoro.create,
                         chunk,
                         voice=voice,
                         speed=self.speed,
-                        lang=lang_code
+                        lang=lang
                     )
 
-                    audio_data = (samples * 32767).astype("int16").tobytes()
+                    audio = (samples * 32767).astype("int16").tobytes()
 
                     await self.write_event(AudioChunk(
-                        audio=audio_data,
-                        rate=sample_rate,
+                        audio=audio,
+                        rate=sr,
                         width=2,
                         channels=1
                     ).event())
 
-                _LOGGER.debug("Inference took %.2f seconds", time.perf_counter() - start_time)
+                _LOGGER.debug("Inference time: %.2fs", time.perf_counter() - start)
 
                 await self.write_event(AudioStop().event())
 
@@ -350,12 +349,23 @@ async def main():
         _LOGGER.error(f"Voices file not found: {voices_path}")
         return
 
-    kokoro = Kokoro(model_path, voices_path)
 
+    kokoro = Kokoro(model_path, voices_path)
     voices = list(kokoro.get_voices())
 
+    try:
+        _LOGGER.info("Warming up model...")
+        kokoro.create(
+            "hello",
+            voice=args.voice,
+            speed=1.0,
+            lang="en-us"
+        )
+    except Exception:
+        pass
+
     server = AsyncServer.from_uri(args.uri)
-    _LOGGER.info(f"Ready. Listening on {args.uri}")
+    _LOGGER.info("Ready on %s", args.uri)
 
     await server.run(
         lambda r, w: KokoroWyomingHandler(
