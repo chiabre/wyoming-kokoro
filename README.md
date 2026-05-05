@@ -38,8 +38,6 @@ chmod +x script/setup
 
 Kokoro supports multiple ONNX model formats depending on hardware.
 
-You can select models via the installer or manually using `--model`.
-
 ### ⚙️ Supported Models
 
 | Alias     | Model                   | Best For         | Notes                           |
@@ -51,28 +49,32 @@ You can select models via the installer or manually using `--model`.
 
 ### 📥 Model Setup
 
-Model and voice files are handled automatically by the setup script.
+Model and voice files are handled automatically by the `./script/model` script.
 
-The installer will:
+The script  will:
 - Detect available GPU/CPU hardware
 - Prompt for model selection (FP16 / FP32 / INT8)
 - Download the correct files into `./data`
-- Ensure version compatibility (Kokoro v1.0 + voices v1.0)
 
 #### ⚙️ Run the automated setup
 
 ```bash
 ./script/model
 ```
-#### 🧠 Model selection (during setup)
-You will be prompted to choose:
 
-| Option | Description                                      |
-| ------ | ------------------------------------------------ |
-| FP16   | 🟢 Recommended for NVIDIA GPU (best performance) |
-| FP32   | 🔵 CPU compatible (stable fallback)              |
-| INT8   | 🪶 Low-power / edge devices                      |
+## 📥 Model Resolution
 
+The runtime **does NOT hardcode a model path**.
+
+Instead it uses this logic:
+
+```text
+--model (CLI override)
+↓
+./data/*.onnx (auto-pick first match)
+↓
+./data/kokoro-v1.0.onnx (fallback)
+```
 
 ---
 
@@ -120,14 +122,11 @@ python3 -m wyoming_kokoro --uri tcp://0.0.0.0:10200
 
 ## 🧠 Voice Behavior
 
-This service supports client-controlled voice selection (Wyoming compliant):
-- If the client (Home Assistant) provides a voice → it is used
-- If no voice is provided → fallback voice is used (af_heart by default)
+### 🎤 Voice selection priority
 
-This enables:
-- per-room voice assignment
-- dynamic persona routing
-- automation-based voice switching
+1. Client-provided voice (Wyoming / Home Assistant)
+2. CLI `--voice`
+3. Default fallback: `af_heart`
 
 ## 🧩 Systemd Deployment
 Install as a background service:
