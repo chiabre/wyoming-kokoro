@@ -118,9 +118,9 @@ python3 -m wyoming_kokoro --uri tcp://0.0.0.0:10200
 
 ---
 
-## 🧠 Voice Behavior (IMPORTANT)
+## 🧠 Voice Behavior
 
-This service now supports client-controlled voice selection (Wyoming compliant):
+This service supports client-controlled voice selection (Wyoming compliant):
 - If the client (Home Assistant) provides a voice → it is used
 - If no voice is provided → fallback voice is used (af_heart by default)
 
